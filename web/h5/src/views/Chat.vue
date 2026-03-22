@@ -63,7 +63,14 @@ const serviceUserName = ref('客服')
 /** Parse a raw SDK message into our Message type */
 function parseMessage(raw: Record<string, unknown>): Message {
   const contentType = Number(raw.contentType ?? 101)
-  const content = (raw.content as string) ?? ''
+  // content may arrive as a pre-parsed object or as a JSON string
+  const rawContent = raw.content
+  const content =
+    typeof rawContent === 'string'
+      ? rawContent
+      : rawContent != null
+        ? JSON.stringify(rawContent)
+        : ''
   const msg: Message = {
     clientMsgID: (raw.clientMsgID as string) ?? String(Date.now()),
     serverMsgID: raw.serverMsgID as string | undefined,

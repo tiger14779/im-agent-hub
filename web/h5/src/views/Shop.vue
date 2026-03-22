@@ -113,7 +113,9 @@
       </div>
     </div>
 
-    <!-- Bottom action bar -->
+    <transition name="fade">
+      <div v-if="toast" class="shop-toast">{{ toast }}</div>
+    </transition>
     <div class="shop-action-bar">
       <!-- Very subtle customer-service button -->
       <button class="cs-btn" @click="showContactInput = true">客服</button>
@@ -150,6 +152,14 @@ const reviews = [
 
 const showContactInput = ref(false)
 const inputId = ref('')
+const toast = ref('')
+
+let toastTimer: ReturnType<typeof setTimeout> | null = null
+function showToast(msg: string) {
+  toast.value = msg
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => { toast.value = '' }, 2000)
+}
 
 function goToChat() {
   const id = inputId.value.trim()
@@ -158,12 +168,11 @@ function goToChat() {
 }
 
 function onCart() {
-  // Decoy action
-  alert('已加入购物车')
+  showToast('已加入购物车')
 }
 
 function onBuy() {
-  alert('请先登录后再购买')
+  showToast('请先登录后再购买')
 }
 
 // Auto-navigate if the URL already contains ?id=
@@ -443,6 +452,21 @@ onMounted(() => {
   font-size: 13px;
   color: #555;
   line-height: 1.6;
+}
+
+/* Toast */
+.shop-toast {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 14px;
+  padding: 10px 20px;
+  border-radius: 6px;
+  z-index: 999;
+  pointer-events: none;
 }
 
 /* Bottom action bar */

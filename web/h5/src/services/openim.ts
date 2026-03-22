@@ -22,6 +22,16 @@ interface SDKInstance {
   off: AnyFn
 }
 
+/** Portable UUID generator — falls back to a random hex string when crypto.randomUUID is unavailable */
+function uuid(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return Array.from({ length: 16 }, () =>
+    Math.floor(Math.random() * 256).toString(16).padStart(2, '0')
+  ).join('')
+}
+
 class OpenIMService {
   private sdk: SDKInstance | null = null
   private initialized = false
@@ -106,7 +116,7 @@ class OpenIMService {
     this.assertReady()
     const url = URL.createObjectURL(audioBlob)
     const msg = await this.sdk!.createSoundMessageByURL({
-      uuid: crypto.randomUUID(),
+      uuid: uuid(),
       sourceUrl: url,
       dataSize: audioBlob.size,
       duration,
@@ -120,7 +130,7 @@ class OpenIMService {
     const url = URL.createObjectURL(file)
     const msg = await this.sdk!.createFileMessageByURL({
       filePath: '',
-      uuid: crypto.randomUUID(),
+      uuid: uuid(),
       sourceUrl: url,
       fileName: file.name,
       fileSize: file.size,
