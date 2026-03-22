@@ -1,0 +1,22 @@
+{
+  "name": "im-agent-hub-h5",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@openim/wasm-client-sdk": "^3.5.1",
+    "axios": "^1.6.0",
+    "pinia": "^2.1.7",
+    "vue": "^3.3.8",
+    "vue-router": "^4.2.5"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^4.5.0",
+    "typescript": "^5.3.2",
+    "vite": "^5.0.0",
+    "vue-tsc": "^3.2.6"
+  }
+}

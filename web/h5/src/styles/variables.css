@@ -1,0 +1,34 @@
+/* ===== WeChat colour & spacing variables ===== */
+:root {
+  /* Backgrounds */
+  --wechat-bg: #EDEDED;
+  --wechat-white: #FFFFFF;
+  --wechat-nav-bg: #EDEDED;
+  --wechat-input-bg: #F5F5F5;
+
+  /* Borders */
+  --wechat-nav-border: #D9D9D9;
+  --wechat-border: #E5E5E5;
+
+  /* Accent */
+  --wechat-green: #95EC69;
+  --wechat-green-dark: #7DD65C;
+  --wechat-blue: #007AFF;
+  --wechat-red: #FA5151;
+
+  /* Typography */
+  --wechat-text: #000000;
+  --wechat-text-secondary: #888888;
+  --wechat-text-light: #AAAAAA;
+
+  /* Bubble */
+  --bubble-self-bg: #95EC69;
+  --bubble-other-bg: #FFFFFF;
+
+  /* Sizes */
+  --nav-height: 44px;
+  --input-area-height: 50px;
+  --avatar-size: 40px;
+  --border-radius: 4px;
+  --bubble-radius: 6px;
+}
