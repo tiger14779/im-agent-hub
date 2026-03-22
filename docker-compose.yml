@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  im-agent-hub:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: im-agent-hub
+    ports:
+      - "8080:8080"
+    volumes:
+      # 持久化数据库和配置
+      - ./data:/app/data
+      - ./config.yaml:/app/config/config.yaml:ro
+    environment:
+      - TZ=Asia/Shanghai
+    restart: unless-stopped
+    networks:
+      - im-network
+
+networks:
+  im-network:
+    driver: bridge

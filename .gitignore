@@ -1,0 +1,55 @@
+# 依赖目录
+node_modules/
+web/h5/node_modules/
+web/admin/node_modules/
+
+# 构建产物
+dist/
+web/h5/dist/
+web/admin/dist/
+bin/
+server/static/h5/
+server/static/admin/
+
+# Go 编译产物
+*.exe
+*.out
+server/chat-app
+
+# 数据库文件（包含敏感数据）
+server/data/
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# 配置文件（含密钥，不提交实际配置）
+# config.yaml  ← 如果是生产配置，不要提交
+# 但我们保留 server/config/config.yaml 作为模板
+
+# 日志
+*.log
+logs/
+
+# 环境变量
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.tar
+
+# 临时文件
+tmp/
+temp/
