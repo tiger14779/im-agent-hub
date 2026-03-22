@@ -33,7 +33,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch, computed } from 'vue'
+import { ref, reactive, watch } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
 
 interface User {
@@ -67,9 +67,8 @@ const form = reactive({
   serviceId: ''
 })
 
-const previewId = computed(() => {
-  return 'user_' + Math.random().toString(36).substring(2, 10)
-})
+// Generate a stable preview ID once per dialog open (not recomputed on every render)
+const previewId = ref('')
 
 const rules: FormRules = {
   nickname: [{ required: true, message: '请输入昵称', trigger: 'blur' }],
@@ -84,6 +83,7 @@ watch(() => props.visible, (val) => {
     } else {
       form.nickname = ''
       form.serviceId = ''
+      previewId.value = 'user_' + Math.random().toString(36).substring(2, 10)
     }
   }
 })

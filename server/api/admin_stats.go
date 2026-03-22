@@ -40,10 +40,10 @@ func GetStats(userSvc *service.UserService, openIMSvc *service.OpenIMService) gi
 		}
 
 		pkg.Success(c, gin.H{
-			"totalUsers":  totalUsers,
-			"todayUsers":  todayUsers,
-			"staffCount":  staffCount,
-			"onlineUsers": onlineCount,
+			"totalUsers":   totalUsers,
+			"todayNew":     todayUsers,
+			"serviceCount": staffCount,
+			"onlineUsers":  onlineCount,
 		})
 	}
 }
