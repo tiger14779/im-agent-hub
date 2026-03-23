@@ -91,7 +91,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
-import { openIMService } from '@/services/openim'
+import { chatWs } from '@/services/ws'
 import request from '@/utils/request'
 import type { Message } from '@/types'
 import MessageList from '@/components/MessageList.vue'
@@ -109,67 +109,26 @@ const errorMsg = ref('')
 const loginId = ref('')
 const myUserId = ref('')
 const myToken = ref('')
-const wsUrl = ref('')
-const apiUrl = ref('')
 const staffNickname = ref('客服')
 const assignedUsers = ref<{ userId: string; nickname: string }[]>([])
 
 const activePeer = ref('')
 const activePeerName = ref('')
-const currentConversationID = ref('')
 const loadingMore = ref(false)
+const oldestSeq = ref(0)
 
-function parseMessage(raw: Record<string, unknown>): Message {
-  const contentType = Number(raw.contentType ?? 101)
-  const rawContent = raw.content
-  const content =
-    typeof rawContent === 'string'
-      ? rawContent
-      : rawContent != null
-        ? JSON.stringify(rawContent)
-        : ''
-  const msg: Message = {
-    clientMsgID: (raw.clientMsgID as string) ?? String(Date.now()),
-    serverMsgID: raw.serverMsgID as string | undefined,
-    sendID: (raw.sendID as string) ?? '',
-    recvID: (raw.recvID as string) ?? '',
-    sessionType: Number(raw.sessionType ?? 1),
-    contentType,
-    content,
-    sendTime: Number(raw.sendTime ?? Date.now()),
-    status: Number(raw.status ?? 2)
+function parseContent(m: Message): Message {
+  const msg = { ...m }
+  try {
+    const parsed = JSON.parse(m.content)
+    if (m.contentType === 101) msg.textContent = parsed.text ?? parsed.content ?? m.content
+    else if (m.contentType === 102) msg.pictureContent = { sourcePicture: { url: parsed.url }, snapshotPicture: { url: parsed.url } }
+    else if (m.contentType === 103) msg.voiceContent = { sourceUrl: parsed.url, duration: parsed.duration }
+    else if (m.contentType === 105) msg.fileContent = { sourceUrl: parsed.url, fileName: parsed.name, fileSize: parsed.size, fileType: parsed.type }
+  } catch {
+    if (m.contentType === 101) msg.textContent = m.content
   }
-
-  // SDK returns rich fields like textElem, pictureElem, etc.
-  const textElem = raw.textElem as Record<string, unknown> | undefined
-  const pictureElem = raw.pictureElem as Record<string, unknown> | undefined
-  const soundElem = raw.soundElem as Record<string, unknown> | undefined
-  const fileElem = raw.fileElem as Record<string, unknown> | undefined
-
-  if (contentType === 101) {
-    if (textElem && typeof textElem.content === 'string') {
-      msg.textContent = textElem.content
-    } else {
-      try {
-        const parsed = typeof content === 'string' ? JSON.parse(content) : content
-        msg.textContent = (parsed as Record<string, unknown>).content as string || content
-      } catch {
-        msg.textContent = content
-      }
-    }
-  } else if (contentType === 102) {
-    msg.pictureContent = (pictureElem as Message['pictureContent']) ?? tryParseJSON(content)
-  } else if (contentType === 103) {
-    msg.voiceContent = (soundElem as Message['voiceContent']) ?? tryParseJSON(content)
-  } else if (contentType === 105) {
-    msg.fileContent = (fileElem as Message['fileContent']) ?? tryParseJSON(content)
-  }
-
   return msg
-}
-
-function tryParseJSON(s: string): Record<string, unknown> | undefined {
-  try { return JSON.parse(s) } catch { return undefined }
 }
 
 async function init() {
@@ -195,34 +154,49 @@ async function doLogin() {
       token: string
       userId: string
       nickname: string
-      wsUrl: string
-      apiUrl: string
       users: { userId: string; nickname: string }[]
     }>('/service/auth/login', { userId: id })
 
     myUserId.value = res.userId
     myToken.value = res.token
-    wsUrl.value = res.wsUrl
-    apiUrl.value = res.apiUrl
     staffNickname.value = res.nickname || '客服'
     assignedUsers.value = res.users || []
 
-    if (!res.token || !res.wsUrl || !res.apiUrl) {
-      throw new Error('登录信息不完整，请检查后端配置')
+    if (!res.token) {
+      throw new Error('登录信息不完整')
     }
 
-    await openIMService.init(res.wsUrl, res.apiUrl)
-    await openIMService.login(res.userId, res.token)
-    await openIMService.waitForConnection()
-
-    openIMService.onNewMessage = (raw) => {
-      const msg = parseMessage(raw as Record<string, unknown>)
-      // Only add to current chat if it belongs to active conversation
+    // Setup callbacks
+    chatWs.onNewMessage = (msg: Message) => {
       if (activePeer.value &&
           (msg.sendID === activePeer.value || msg.recvID === activePeer.value)) {
         chatStore.addMessage(msg)
       }
     }
+
+    chatWs.onAck = (ack) => {
+      chatStore.updateMessageStatus(ack.clientMsgId, ack.status, ack.serverMsgId)
+    }
+
+    chatWs.onHistory = (data) => {
+      const parsed = (data.messages as unknown as Message[]).map(parseContent)
+      chatStore.loadHistory(parsed)
+      chatStore.hasMore = data.hasMore
+      if (parsed.length > 0) {
+        oldestSeq.value = Math.min(...parsed.map(m => (m as unknown as { seq: number }).seq || 0))
+      }
+      loadingMore.value = false
+    }
+
+    // Connect WebSocket
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('WebSocket 连接超时')), 10000)
+      chatWs.onConnected = () => {
+        clearTimeout(timeout)
+        resolve()
+      }
+      chatWs.connect(res.userId, res.token, 'staff')
+    })
 
     // Update URL to include id for refresh
     if (!route.query.id) {
@@ -237,90 +211,50 @@ async function doLogin() {
   }
 }
 
-async function selectUser(userId: string, nickname: string) {
+function selectUser(userId: string, nickname: string) {
   activePeer.value = userId
   activePeerName.value = nickname || userId
   chatStore.clearMessages()
-  currentConversationID.value = ''
+  oldestSeq.value = 0
 
-  try {
-    const conversationID = await openIMService.getConversationID(userId)
-    currentConversationID.value = conversationID
-    if (conversationID) {
-      const history = await openIMService.getHistoryMessages(conversationID)
-      const parsed = (history as Record<string, unknown>[]).map(parseMessage)
-      chatStore.loadHistory(parsed)
-      if (parsed.length < 20) {
-        chatStore.hasMore = false
-      }
-    }
-  } catch (err) {
-    console.error('[ServiceChat] load history failed', err)
-  }
+  chatWs.loadHistory(userId)
+  chatWs.markRead(userId)
 }
 
 function goBack() {
   activePeer.value = ''
   activePeerName.value = ''
-  currentConversationID.value = ''
   chatStore.clearMessages()
 }
 
-async function onLoadMore() {
-  if (loadingMore.value || !chatStore.hasMore || !currentConversationID.value) return
+function onLoadMore() {
+  if (loadingMore.value || !chatStore.hasMore) return
   loadingMore.value = true
-  try {
-    const oldest = chatStore.messages[0]
-    const startMsgID = oldest?.clientMsgID ?? ''
-    const history = await openIMService.getHistoryMessages(
-      currentConversationID.value,
-      startMsgID,
-      20
-    )
-    const parsed = (history as Record<string, unknown>[]).map(parseMessage)
-    if (parsed.length === 0) {
-      chatStore.hasMore = false
-    } else {
-      chatStore.loadHistory(parsed)
-      if (parsed.length < 20) {
-        chatStore.hasMore = false
-      }
-    }
-  } catch (err) {
-    console.warn('[ServiceChat] load more history failed', err)
-  } finally {
-    loadingMore.value = false
-  }
+  chatWs.loadHistory(activePeer.value, oldestSeq.value, 50)
 }
 
-async function onSendText(text: string) {
+function onSendText(text: string) {
   const peerId = activePeer.value
-  const tempMsg: Message = {
-    clientMsgID: `tmp_${Date.now()}`,
+  const clientMsgID = chatWs.sendTextMessage(peerId, text)
+  chatStore.addMessage({
+    clientMsgID,
     sendID: myUserId.value,
     recvID: peerId,
     sessionType: 1,
     contentType: 101,
-    content: JSON.stringify({ content: text }),
+    content: JSON.stringify({ text }),
     textContent: text,
     sendTime: Date.now(),
     status: 1
-  }
-  chatStore.addMessage(tempMsg)
-  try {
-    const sent = await openIMService.sendTextMessage(peerId, text)
-    chatStore.updateMessageStatus(tempMsg.clientMsgID, 2, (sent as { serverMsgID?: string })?.serverMsgID)
-  } catch (err) {
-    console.error('[ServiceChat] send text failed', err)
-    chatStore.updateMessageStatus(tempMsg.clientMsgID, 3)
-  }
+  })
 }
 
 async function onSendImage(file: File) {
   const peerId = activePeer.value
   const url = URL.createObjectURL(file)
-  const tempMsg: Message = {
-    clientMsgID: `tmp_${Date.now()}`,
+  const tempMsgID = `tmp_${Date.now()}`
+  chatStore.addMessage({
+    clientMsgID: tempMsgID,
     sendID: myUserId.value,
     recvID: peerId,
     sessionType: 1,
@@ -329,21 +263,21 @@ async function onSendImage(file: File) {
     pictureContent: { snapshotPicture: { url } },
     sendTime: Date.now(),
     status: 1
-  }
-  chatStore.addMessage(tempMsg)
+  })
   try {
-    await openIMService.sendImageMessage(peerId, file)
-    chatStore.updateMessageStatus(tempMsg.clientMsgID, 2)
-  } catch (err) {
-    console.error('[ServiceChat] send image failed', err)
-    chatStore.updateMessageStatus(tempMsg.clientMsgID, 3)
+    const realId = await chatWs.sendImageMessage(peerId, file)
+    const msg = chatStore.messages.find(m => m.clientMsgID === tempMsgID)
+    if (msg) msg.clientMsgID = realId
+  } catch {
+    chatStore.updateMessageStatus(tempMsgID, 3)
   }
 }
 
 async function onSendFile(file: File) {
   const peerId = activePeer.value
-  const tempMsg: Message = {
-    clientMsgID: `tmp_${Date.now()}`,
+  const tempMsgID = `tmp_${Date.now()}`
+  chatStore.addMessage({
+    clientMsgID: tempMsgID,
     sendID: myUserId.value,
     recvID: peerId,
     sessionType: 1,
@@ -352,22 +286,22 @@ async function onSendFile(file: File) {
     fileContent: { fileName: file.name, fileSize: file.size, fileType: file.type },
     sendTime: Date.now(),
     status: 1
-  }
-  chatStore.addMessage(tempMsg)
+  })
   try {
-    await openIMService.sendFileMessage(peerId, file)
-    chatStore.updateMessageStatus(tempMsg.clientMsgID, 2)
-  } catch (err) {
-    console.error('[ServiceChat] send file failed', err)
-    chatStore.updateMessageStatus(tempMsg.clientMsgID, 3)
+    const realId = await chatWs.sendFileMessage(peerId, file)
+    const msg = chatStore.messages.find(m => m.clientMsgID === tempMsgID)
+    if (msg) msg.clientMsgID = realId
+  } catch {
+    chatStore.updateMessageStatus(tempMsgID, 3)
   }
 }
 
 async function onSendVoice({ blob, duration }: { blob: Blob; duration: number }) {
   const peerId = activePeer.value
   const url = URL.createObjectURL(blob)
-  const tempMsg: Message = {
-    clientMsgID: `tmp_${Date.now()}`,
+  const tempMsgID = `tmp_${Date.now()}`
+  chatStore.addMessage({
+    clientMsgID: tempMsgID,
     sendID: myUserId.value,
     recvID: peerId,
     sessionType: 1,
@@ -376,20 +310,19 @@ async function onSendVoice({ blob, duration }: { blob: Blob; duration: number })
     voiceContent: { sourceUrl: url, duration },
     sendTime: Date.now(),
     status: 1
-  }
-  chatStore.addMessage(tempMsg)
+  })
   try {
-    await openIMService.sendVoiceMessage(peerId, blob, duration)
-    chatStore.updateMessageStatus(tempMsg.clientMsgID, 2)
-  } catch (err) {
-    console.error('[ServiceChat] send voice failed', err)
-    chatStore.updateMessageStatus(tempMsg.clientMsgID, 3)
+    const realId = await chatWs.sendVoiceMessage(peerId, blob, duration)
+    const msg = chatStore.messages.find(m => m.clientMsgID === tempMsgID)
+    if (msg) msg.clientMsgID = realId
+  } catch {
+    chatStore.updateMessageStatus(tempMsgID, 3)
   }
 }
 
 onMounted(init)
 onUnmounted(() => {
-  openIMService.onNewMessage = () => {}
+  chatWs.disconnect()
 })
 </script>
 

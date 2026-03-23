@@ -47,7 +47,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useChatStore } from '@/stores/chat'
-import { openIMService } from '@/services/openim'
+import { chatWs } from '@/services/ws'
 import request from '@/utils/request'
 import type { Message } from '@/types'
 import MessageList from '@/components/MessageList.vue'
@@ -62,64 +62,8 @@ const chatStore = useChatStore()
 const state = ref<PageState>('loading')
 const errorMsg = ref('')
 const serviceUserName = ref('客服')
-const currentConversationID = ref('')
 const loadingMore = ref(false)
-
-/** Parse a raw SDK message into our Message type */
-function parseMessage(raw: Record<string, unknown>): Message {
-  const contentType = Number(raw.contentType ?? 101)
-  // content may arrive as a pre-parsed object or as a JSON string
-  const rawContent = raw.content
-  const content =
-    typeof rawContent === 'string'
-      ? rawContent
-      : rawContent != null
-        ? JSON.stringify(rawContent)
-        : ''
-  const msg: Message = {
-    clientMsgID: (raw.clientMsgID as string) ?? String(Date.now()),
-    serverMsgID: raw.serverMsgID as string | undefined,
-    sendID: (raw.sendID as string) ?? '',
-    recvID: (raw.recvID as string) ?? '',
-    sessionType: Number(raw.sessionType ?? 1),
-    contentType,
-    content,
-    sendTime: Number(raw.sendTime ?? Date.now()),
-    status: Number(raw.status ?? 2)
-  }
-
-  // SDK returns rich fields like textElem, pictureElem, etc.
-  const textElem = raw.textElem as Record<string, unknown> | undefined
-  const pictureElem = raw.pictureElem as Record<string, unknown> | undefined
-  const soundElem = raw.soundElem as Record<string, unknown> | undefined
-  const fileElem = raw.fileElem as Record<string, unknown> | undefined
-
-  if (contentType === 101) {
-    // Priority: textElem.content > parsed content JSON > raw content string
-    if (textElem && typeof textElem.content === 'string') {
-      msg.textContent = textElem.content
-    } else {
-      try {
-        const parsed = typeof content === 'string' ? JSON.parse(content) : content
-        msg.textContent = (parsed as Record<string, unknown>).content as string || content
-      } catch {
-        msg.textContent = content
-      }
-    }
-  } else if (contentType === 102) {
-    msg.pictureContent = (pictureElem as Message['pictureContent']) ?? tryParseJSON(content)
-  } else if (contentType === 103) {
-    msg.voiceContent = (soundElem as Message['voiceContent']) ?? tryParseJSON(content)
-  } else if (contentType === 105) {
-    msg.fileContent = (fileElem as Message['fileContent']) ?? tryParseJSON(content)
-  }
-
-  return msg
-}
-
-function tryParseJSON(s: string): Record<string, unknown> | undefined {
-  try { return JSON.parse(s) } catch { return undefined }
-}
+const oldestSeq = ref(0)
 
 async function init() {
   const targetId = (route.query.id as string | undefined)?.trim()
@@ -134,66 +78,80 @@ async function init() {
   chatStore.clearMessages()
 
   try {
-    // 1. Authenticate via backend (always refresh to avoid stale local cache)
+    // 1. Authenticate via backend
     const res = await request.post<unknown, {
       token: string
-      wsUrl?: string
-      apiUrl?: string
+      userId: string
+      nickname?: string
       serviceUserId?: string
-      serviceUserName?: string
     }>('/client/auth/login', { userId: targetId })
 
     userStore.login({
       userId: targetId,
       token: res.token,
-      serviceUserId: res.serviceUserId,
-      wsUrl: res.wsUrl,
-      apiUrl: res.apiUrl
+      nickname: res.nickname,
+      serviceUserId: res.serviceUserId
     })
 
-    serviceUserName.value = res.serviceUserName ?? '客服'
-
-    const wsUrl = userStore.wsUrl
-    const apiUrl = userStore.apiUrl
+    serviceUserName.value = '客服'
     const serviceId = userStore.serviceUserId || targetId
 
     if (!userStore.token) {
       throw new Error('登录令牌缺失，请重新进入聊天链接')
     }
-    if (!wsUrl || !apiUrl) {
-      throw new Error('OpenIM 连接地址缺失，请检查后端登录接口返回')
-    }
 
-    // 2. Initialise & login to OpenIM SDK
-    await openIMService.init(wsUrl, apiUrl)
-    await openIMService.login(userStore.userId, userStore.token)
-
-    // 3. Listen for incoming messages
-    openIMService.onNewMessage = (raw) => {
-      const msg = parseMessage(raw as Record<string, unknown>)
+    // 2. Setup WebSocket callbacks
+    chatWs.onNewMessage = (msg: Message) => {
       chatStore.addMessage(msg)
     }
 
-    // Wait for SDK connection to be fully established
-    await openIMService.waitForConnection()
+    chatWs.onAck = (ack) => {
+      chatStore.updateMessageStatus(
+        ack.clientMsgId,
+        ack.status,
+        ack.serverMsgId
+      )
+    }
+
+    chatWs.onHistory = (data) => {
+      const msgs = data.messages as unknown as Message[]
+      // Parse content for each message
+      const parsed = msgs.map(m => {
+        const msg = { ...m }
+        try {
+          const parsed = JSON.parse(m.content)
+          if (m.contentType === 101) msg.textContent = parsed.text ?? parsed.content ?? m.content
+          else if (m.contentType === 102) msg.pictureContent = { sourcePicture: { url: parsed.url }, snapshotPicture: { url: parsed.url } }
+          else if (m.contentType === 103) msg.voiceContent = { sourceUrl: parsed.url, duration: parsed.duration }
+          else if (m.contentType === 105) msg.fileContent = { sourceUrl: parsed.url, fileName: parsed.name, fileSize: parsed.size, fileType: parsed.type }
+        } catch {
+          if (m.contentType === 101) msg.textContent = m.content
+        }
+        return msg
+      })
+
+      chatStore.loadHistory(parsed)
+      chatStore.hasMore = data.hasMore
+      if (parsed.length > 0) {
+        oldestSeq.value = Math.min(...parsed.map(m => (m as unknown as { seq: number }).seq || 0))
+      }
+    }
+
+    // 3. Connect WebSocket
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('WebSocket 连接超时')), 10000)
+      chatWs.onConnected = () => {
+        clearTimeout(timeout)
+        resolve()
+      }
+      chatWs.connect(userStore.userId, userStore.token, 'client')
+    })
 
     state.value = 'ready'
 
-    // 4. Load recent history (non-blocking — don't let failures prevent chatting)
-    try {
-      const conversationID = await openIMService.getConversationID(serviceId)
-      currentConversationID.value = conversationID
-      if (conversationID) {
-        const history = await openIMService.getHistoryMessages(conversationID)
-        const parsed = (history as Record<string, unknown>[]).map(parseMessage)
-        chatStore.loadHistory(parsed)
-        if (parsed.length < 20) {
-          chatStore.hasMore = false
-        }
-      }
-    } catch (histErr) {
-      console.warn('[Chat] load history failed (non-fatal)', histErr)
-    }
+    // 4. Load recent history
+    chatWs.loadHistory(serviceId)
+    chatWs.markRead(serviceId)
   } catch (err) {
     console.error('[Chat] init failed', err)
     errorMsg.value = (err as Error).message || '连接失败，请重试'
@@ -201,63 +159,38 @@ async function init() {
   }
 }
 
-async function onLoadMore() {
-  if (loadingMore.value || !chatStore.hasMore || !currentConversationID.value) return
+function onLoadMore() {
+  if (loadingMore.value || !chatStore.hasMore) return
   loadingMore.value = true
-  try {
-    // Use the oldest message's clientMsgID as the cursor
-    const oldest = chatStore.messages[0]
-    const startMsgID = oldest?.clientMsgID ?? ''
-    const history = await openIMService.getHistoryMessages(
-      currentConversationID.value,
-      startMsgID,
-      20
-    )
-    const parsed = (history as Record<string, unknown>[]).map(parseMessage)
-    if (parsed.length === 0) {
-      chatStore.hasMore = false
-    } else {
-      chatStore.loadHistory(parsed)
-      if (parsed.length < 20) {
-        chatStore.hasMore = false
-      }
-    }
-  } catch (err) {
-    console.warn('[Chat] load more history failed', err)
-  } finally {
-    loadingMore.value = false
-  }
+  const serviceId = userStore.serviceUserId || (route.query.id as string)
+  chatWs.loadHistory(serviceId, oldestSeq.value, 50)
+  // The onHistory callback will handle the result
+  setTimeout(() => { loadingMore.value = false }, 1000)
 }
 
-async function onSendText(text: string) {
+function onSendText(text: string) {
   const serviceId = userStore.serviceUserId || (route.query.id as string)
+  const clientMsgID = chatWs.sendTextMessage(serviceId, text)
   const tempMsg: Message = {
-    clientMsgID: `tmp_${Date.now()}`,
+    clientMsgID,
     sendID: userStore.userId,
     recvID: serviceId,
     sessionType: 1,
     contentType: 101,
-    content: JSON.stringify({ content: text }),
+    content: JSON.stringify({ text }),
     textContent: text,
     sendTime: Date.now(),
     status: 1
   }
   chatStore.addMessage(tempMsg)
-
-  try {
-    const sent = await openIMService.sendTextMessage(serviceId, text)
-    chatStore.updateMessageStatus(tempMsg.clientMsgID, 2, (sent as { serverMsgID?: string })?.serverMsgID)
-  } catch (err) {
-    console.error('[Chat] send text failed', { serviceId, err })
-    chatStore.updateMessageStatus(tempMsg.clientMsgID, 3)
-  }
 }
 
 async function onSendImage(file: File) {
   const serviceId = userStore.serviceUserId || (route.query.id as string)
   const url = URL.createObjectURL(file)
+  const tempMsgID = `tmp_${Date.now()}`
   const tempMsg: Message = {
-    clientMsgID: `tmp_${Date.now()}`,
+    clientMsgID: tempMsgID,
     sendID: userStore.userId,
     recvID: serviceId,
     sessionType: 1,
@@ -269,18 +202,20 @@ async function onSendImage(file: File) {
   }
   chatStore.addMessage(tempMsg)
   try {
-    await openIMService.sendImageMessage(serviceId, file)
-    chatStore.updateMessageStatus(tempMsg.clientMsgID, 2)
+    const realId = await chatWs.sendImageMessage(serviceId, file)
+    // Update temp msg's clientMsgID to the real one for ACK matching
+    const msg = chatStore.messages.find(m => m.clientMsgID === tempMsgID)
+    if (msg) msg.clientMsgID = realId
   } catch (err) {
-    console.error('[Chat] send image failed', { serviceId, err })
-    chatStore.updateMessageStatus(tempMsg.clientMsgID, 3)
+    chatStore.updateMessageStatus(tempMsgID, 3)
   }
 }
 
 async function onSendFile(file: File) {
   const serviceId = userStore.serviceUserId || (route.query.id as string)
+  const tempMsgID = `tmp_${Date.now()}`
   const tempMsg: Message = {
-    clientMsgID: `tmp_${Date.now()}`,
+    clientMsgID: tempMsgID,
     sendID: userStore.userId,
     recvID: serviceId,
     sessionType: 1,
@@ -292,19 +227,20 @@ async function onSendFile(file: File) {
   }
   chatStore.addMessage(tempMsg)
   try {
-    await openIMService.sendFileMessage(serviceId, file)
-    chatStore.updateMessageStatus(tempMsg.clientMsgID, 2)
+    const realId = await chatWs.sendFileMessage(serviceId, file)
+    const msg = chatStore.messages.find(m => m.clientMsgID === tempMsgID)
+    if (msg) msg.clientMsgID = realId
   } catch (err) {
-    console.error('[Chat] send file failed', { serviceId, err })
-    chatStore.updateMessageStatus(tempMsg.clientMsgID, 3)
+    chatStore.updateMessageStatus(tempMsgID, 3)
   }
 }
 
 async function onSendVoice({ blob, duration }: { blob: Blob; duration: number }) {
   const serviceId = userStore.serviceUserId || (route.query.id as string)
   const url = URL.createObjectURL(blob)
+  const tempMsgID = `tmp_${Date.now()}`
   const tempMsg: Message = {
-    clientMsgID: `tmp_${Date.now()}`,
+    clientMsgID: tempMsgID,
     sendID: userStore.userId,
     recvID: serviceId,
     sessionType: 1,
@@ -316,17 +252,17 @@ async function onSendVoice({ blob, duration }: { blob: Blob; duration: number })
   }
   chatStore.addMessage(tempMsg)
   try {
-    await openIMService.sendVoiceMessage(serviceId, blob, duration)
-    chatStore.updateMessageStatus(tempMsg.clientMsgID, 2)
+    const realId = await chatWs.sendVoiceMessage(serviceId, blob, duration)
+    const msg = chatStore.messages.find(m => m.clientMsgID === tempMsgID)
+    if (msg) msg.clientMsgID = realId
   } catch (err) {
-    console.error('[Chat] send voice failed', { serviceId, err })
-    chatStore.updateMessageStatus(tempMsg.clientMsgID, 3)
+    chatStore.updateMessageStatus(tempMsgID, 3)
   }
 }
 
 onMounted(init)
 onUnmounted(() => {
-  openIMService.onNewMessage = () => {}
+  chatWs.disconnect()
 })
 </script>
 

@@ -5,7 +5,6 @@ import (
 	"im-agent-hub/database"
 	"im-agent-hub/model"
 	"im-agent-hub/pkg"
-	"im-agent-hub/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -15,9 +14,8 @@ type serviceLoginReq struct {
 }
 
 // ServiceLogin handles POST /api/service/auth/login.
-// It looks up the service staff, fetches an OpenIM token, and returns connection info
-// along with the list of users assigned to this service staff.
-func ServiceLogin(openIMSvc *service.OpenIMService) gin.HandlerFunc {
+// It looks up the service staff and returns a JWT token along with the assigned users.
+func ServiceLogin() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req serviceLoginReq
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -37,15 +35,9 @@ func ServiceLogin(openIMSvc *service.OpenIMService) gin.HandlerFunc {
 			return
 		}
 
-		// Ensure registered in OpenIM
-		if err := openIMSvc.EnsureUserRegistered(staff.UserID, staff.Nickname); err != nil {
-			pkg.Fail(c, 500, "failed to ensure service user in openim: "+err.Error())
-			return
-		}
-
-		token, err := openIMSvc.GetUserToken(staff.UserID)
+		token, err := pkg.GenerateToken(staff.UserID, false, config.Cfg.Server.JWTSecret)
 		if err != nil {
-			pkg.Fail(c, 500, "failed to obtain im token: "+err.Error())
+			pkg.Fail(c, 500, "failed to generate token")
 			return
 		}
 
@@ -67,8 +59,6 @@ func ServiceLogin(openIMSvc *service.OpenIMService) gin.HandlerFunc {
 			"token":    token,
 			"userId":   staff.UserID,
 			"nickname": staff.Nickname,
-			"wsUrl":    config.Cfg.OpenIM.WSURL,
-			"apiUrl":   config.Cfg.OpenIM.APIURL,
 			"users":    userList,
 		})
 	}

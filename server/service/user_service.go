@@ -5,20 +5,17 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"log"
 
 	"im-agent-hub/database"
 	"im-agent-hub/model"
 )
 
 // UserService handles user business logic.
-type UserService struct {
-	openIM *OpenIMService
-}
+type UserService struct{}
 
-// NewUserService creates a UserService backed by the given OpenIM service.
-func NewUserService(openIM *OpenIMService) *UserService {
-	return &UserService{openIM: openIM}
+// NewUserService creates a UserService.
+func NewUserService() *UserService {
+	return &UserService{}
 }
 
 // generateUserID produces a cryptographically random user ID in the form "user_xxxxxxxx".
@@ -30,7 +27,7 @@ func generateUserID() string {
 	return "user_" + hex.EncodeToString(b)
 }
 
-// CreateUser registers a new user in both the local DB and OpenIM.
+// CreateUser creates a new user in the local DB.
 func (s *UserService) CreateUser(nickname, serviceUserID string) (*model.User, error) {
 	user := &model.User{
 		ID:            generateUserID(),
@@ -41,14 +38,6 @@ func (s *UserService) CreateUser(nickname, serviceUserID string) (*model.User, e
 
 	if err := database.DB.Create(user).Error; err != nil {
 		return nil, fmt.Errorf("create user in db: %w", err)
-	}
-
-	if err := s.openIM.RegisterUser(user.ID, user.Nickname); err != nil {
-		// Roll back local record to keep consistency.
-		if delErr := database.DB.Delete(user).Error; delErr != nil {
-			log.Printf("createUser: failed to rollback user %s after openim error: %v", user.ID, delErr)
-		}
-		return nil, fmt.Errorf("register user in openim: %w", err)
 	}
 
 	return user, nil

@@ -8,6 +8,7 @@ dist/
 web/h5/dist/
 web/admin/dist/
 bin/
+pc/build/
 server/static/h5/
 server/static/admin/
 

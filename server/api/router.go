@@ -10,7 +10,7 @@ import (
 // SetupRouter builds and returns the configured Gin engine.
 func SetupRouter(
 	userSvc *service.UserService,
-	openIMSvc *service.OpenIMService,
+	msgSvc *service.MessageService,
 ) *gin.Engine {
 	r := gin.Default()
 
@@ -18,16 +18,21 @@ func SetupRouter(
 	r.Use(cors.New(cors.Config{
 		AllowAllOrigins:  true,
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "X-Service-UserID"},
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: false,
 	}))
 
+	chatHub := NewChatHub(msgSvc)
+
 	// Client auth
-	r.POST("/api/client/auth/login", ClientLogin(userSvc, openIMSvc))
+	r.POST("/api/client/auth/login", ClientLogin(userSvc))
+
+	// Client WebSocket
+	r.GET("/api/ws", chatHub.HandleClientWS)
 
 	// Service staff auth
-	r.POST("/api/service/auth/login", ServiceLogin(openIMSvc))
+	r.POST("/api/service/auth/login", ServiceLogin())
 
 	// Admin auth (no JWT required)
 	r.POST("/api/admin/auth/login", AdminLogin())
@@ -36,10 +41,22 @@ func SetupRouter(
 	r.POST("/api/upload", UploadFile())
 	r.GET("/api/files/*path", ServeUploadedFiles())
 
+	// WebSocket for service staff messaging
+	r.GET("/api/service/ws", chatHub.HandleStaffWS)
+
+	// Service staff API (token + staff ID required)
+	svc := r.Group("/api/service", ServiceTokenAuth())
+	{
+		svc.GET("/profile", ServiceGetProfile())
+		svc.GET("/contacts", ServiceGetContacts())
+		svc.POST("/contacts", ServiceAddUser(userSvc))
+		svc.PUT("/contacts/:userId", ServiceUpdateContact())
+	}
+
 	// Admin routes (JWT + admin role required)
 	admin := r.Group("/api/admin", JWTAuth(), AdminRequired())
 	{
-		admin.GET("/stats", GetStats(userSvc, openIMSvc))
+		admin.GET("/stats", GetStats(userSvc, chatHub))
 
 		admin.GET("/users", ListUsers(userSvc))
 		admin.POST("/users", CreateUser(userSvc))
@@ -48,7 +65,7 @@ func SetupRouter(
 		admin.DELETE("/users/:id", DeleteUser(userSvc))
 
 		admin.GET("/services", ListServiceStaff())
-		admin.POST("/services", CreateServiceStaff(openIMSvc))
+		admin.POST("/services", CreateServiceStaff())
 		admin.PUT("/services/:id", UpdateServiceStaff())
 		admin.DELETE("/services/:id", DeleteServiceStaff())
 
@@ -64,8 +81,11 @@ func SetupRouter(
 
 // setupStaticFiles registers handlers to serve the two frontend SPAs.
 func setupStaticFiles(r *gin.Engine) {
-	// Admin SPA — must be registered before the wildcard catch-all.
+	// H5 SPA assets
+	r.Static("/assets", "./static/h5/assets")
+	// Admin SPA assets
 	r.Static("/admin/assets", "./static/admin/assets")
+
 	r.NoRoute(func(c *gin.Context) {
 		path := c.Request.URL.Path
 		if len(path) >= 6 && path[:6] == "/admin" {

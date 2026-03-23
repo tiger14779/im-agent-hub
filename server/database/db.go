@@ -7,8 +7,8 @@ import (
 	"im-agent-hub/config"
 	"im-agent-hub/model"
 
+	"github.com/glebarez/sqlite"
 	"golang.org/x/crypto/bcrypt"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -26,7 +26,7 @@ func Init() {
 		log.Fatalf("failed to open database: %v", err)
 	}
 
-	if err := db.AutoMigrate(&model.User{}, &model.ServiceStaff{}, &model.Admin{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.ServiceStaff{}, &model.Admin{}, &model.Message{}, &model.Conversation{}); err != nil {
 		log.Fatalf("failed to auto-migrate: %v", err)
 	}
 

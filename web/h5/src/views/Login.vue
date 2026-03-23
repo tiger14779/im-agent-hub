@@ -48,17 +48,16 @@ async function handleLogin() {
   try {
     const res = await request.post<unknown, {
       token: string
-      wsUrl?: string
-      apiUrl?: string
+      userId: string
+      nickname?: string
       serviceUserId?: string
     }>('/client/auth/login', { userId: id })
 
     userStore.login({
       userId: id,
       token: res.token,
-      serviceUserId: res.serviceUserId,
-      wsUrl: res.wsUrl,
-      apiUrl: res.apiUrl
+      nickname: res.nickname,
+      serviceUserId: res.serviceUserId
     })
 
     router.replace({ path: '/chat', query: { id } })

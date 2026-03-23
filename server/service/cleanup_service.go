@@ -2,25 +2,22 @@ package service
 
 import (
 	"log"
-	"time"
 
 	"im-agent-hub/config"
-	"im-agent-hub/database"
-	"im-agent-hub/model"
 
 	"github.com/robfig/cron/v3"
 )
 
-// CleanupService schedules periodic message cleanup via OpenIM.
+// CleanupService schedules periodic message cleanup.
 type CleanupService struct {
-	openIM    *OpenIMService
+	msgSvc    *MessageService
 	scheduler *cron.Cron
 }
 
-// NewCleanupService creates a CleanupService backed by the given OpenIM service.
-func NewCleanupService(openIM *OpenIMService) *CleanupService {
+// NewCleanupService creates a CleanupService backed by the given MessageService.
+func NewCleanupService(msgSvc *MessageService) *CleanupService {
 	return &CleanupService{
-		openIM:    openIM,
+		msgSvc:    msgSvc,
 		scheduler: cron.New(),
 	}
 }
@@ -43,27 +40,13 @@ func (s *CleanupService) StartCleanup() {
 	log.Printf("cleanup: cron job scheduled with expression %q (retention: %d days)", cfg.Cron, cfg.RetentionDays)
 }
 
-// runCleanup iterates over all users and asks OpenIM to clear old messages.
+// runCleanup deletes messages older than the configured retention period.
 func (s *CleanupService) runCleanup() {
 	retentionDays := config.Cfg.Cleanup.RetentionDays
-	cutoff := time.Now().AddDate(0, 0, -retentionDays)
-	log.Printf("cleanup: starting — removing messages older than %s", cutoff.Format(time.RFC3339))
-
-	var users []model.User
-	if err := database.DB.Find(&users).Error; err != nil {
-		log.Printf("cleanup: failed to fetch users: %v", err)
+	deleted, err := s.msgSvc.CleanupOldMessages(retentionDays)
+	if err != nil {
+		log.Printf("cleanup: error: %v", err)
 		return
 	}
-
-	success, failed := 0, 0
-	for _, u := range users {
-		if err := s.openIM.DeleteMessages(u.ID, cutoff); err != nil {
-			log.Printf("cleanup: failed for user %s: %v", u.ID, err)
-			failed++
-		} else {
-			success++
-		}
-	}
-
-	log.Printf("cleanup: finished — success=%d, failed=%d", success, failed)
+	log.Printf("cleanup: finished — deleted %d messages", deleted)
 }

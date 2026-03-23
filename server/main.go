@@ -26,18 +26,12 @@ func main() {
 
 	database.Init()
 
-	openIMSvc := service.NewOpenIMService(
-		config.Cfg.OpenIM.APIURL,
-		config.Cfg.OpenIM.AdminUserID,
-		config.Cfg.OpenIM.Secret,
-	)
-
-	userSvc := service.NewUserService(openIMSvc)
-
-	cleanupSvc := service.NewCleanupService(openIMSvc)
+	userSvc := service.NewUserService()
+	msgSvc := service.NewMessageService()
+	cleanupSvc := service.NewCleanupService(msgSvc)
 	cleanupSvc.StartCleanup()
 
-	router := api.SetupRouter(userSvc, openIMSvc)
+	router := api.SetupRouter(userSvc, msgSvc)
 
 	addr := fmt.Sprintf(":%d", config.Cfg.Server.Port)
 	log.Printf("server starting on %s", addr)

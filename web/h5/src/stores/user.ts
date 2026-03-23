@@ -5,10 +5,9 @@ const STORAGE_KEY = 'im_user_info'
 export const useUserStore = defineStore('user', {
   state: () => ({
     userId: '',
+    nickname: '',
     token: '',
-    serviceUserId: '',
-    wsUrl: '',
-    apiUrl: ''
+    serviceUserId: ''
   }),
 
   getters: {
@@ -22,10 +21,9 @@ export const useUserStore = defineStore('user', {
         STORAGE_KEY,
         JSON.stringify({
           userId: this.userId,
+          nickname: this.nickname,
           token: this.token,
-          serviceUserId: this.serviceUserId,
-          wsUrl: this.wsUrl,
-          apiUrl: this.apiUrl
+          serviceUserId: this.serviceUserId
         })
       )
     },
@@ -37,10 +35,9 @@ export const useUserStore = defineStore('user', {
       try {
         const data = JSON.parse(raw)
         this.userId = data.userId || ''
+        this.nickname = data.nickname || ''
         this.token = data.token || ''
         this.serviceUserId = data.serviceUserId || ''
-        this.wsUrl = data.wsUrl || ''
-        this.apiUrl = data.apiUrl || ''
       } catch {
         // Ignore malformed storage data
       }
@@ -50,24 +47,21 @@ export const useUserStore = defineStore('user', {
     login(info: {
       userId: string
       token: string
+      nickname?: string
       serviceUserId?: string
-      wsUrl?: string
-      apiUrl?: string
     }) {
       this.userId = info.userId
       this.token = info.token
+      this.nickname = info.nickname || ''
       this.serviceUserId = info.serviceUserId || ''
-      this.wsUrl = info.wsUrl || ''
-      this.apiUrl = info.apiUrl || ''
       this.saveToStorage()
     },
 
     logout() {
       this.userId = ''
+      this.nickname = ''
       this.token = ''
       this.serviceUserId = ''
-      this.wsUrl = ''
-      this.apiUrl = ''
       localStorage.removeItem(STORAGE_KEY)
     }
   }

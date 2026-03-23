@@ -9,7 +9,6 @@ import (
 
 type Config struct {
 	Server  ServerConfig  `mapstructure:"server"`
-	OpenIM  OpenIMConfig  `mapstructure:"openim"`
 	Admin   AdminConfig   `mapstructure:"admin"`
 	Cleanup CleanupConfig `mapstructure:"cleanup"`
 }
@@ -17,13 +16,6 @@ type Config struct {
 type ServerConfig struct {
 	Port      int    `mapstructure:"port"`
 	JWTSecret string `mapstructure:"jwt_secret"`
-}
-
-type OpenIMConfig struct {
-	APIURL      string `mapstructure:"api_url"`
-	WSURL       string `mapstructure:"ws_url"`
-	AdminUserID string `mapstructure:"admin_user_id"`
-	Secret      string `mapstructure:"secret"`
 }
 
 type AdminConfig struct {

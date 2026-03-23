@@ -1,8 +1,6 @@
 package api
 
 import (
-	"log"
-
 	"im-agent-hub/config"
 	"im-agent-hub/pkg"
 	"im-agent-hub/service"
@@ -15,8 +13,8 @@ type clientLoginReq struct {
 }
 
 // ClientLogin handles POST /api/client/auth/login.
-// It looks up the user, fetches an OpenIM token, and returns connection info.
-func ClientLogin(userSvc *service.UserService, openIMSvc *service.OpenIMService) gin.HandlerFunc {
+// It looks up the user and returns a JWT token + serviceUserId.
+func ClientLogin(userSvc *service.UserService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req clientLoginReq
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -35,35 +33,17 @@ func ClientLogin(userSvc *service.UserService, openIMSvc *service.OpenIMService)
 			return
 		}
 
-		// Ensure the client user itself is registered in OpenIM
-		if err := openIMSvc.EnsureUserRegistered(user.ID, user.Nickname); err != nil {
-			log.Printf("[ClientLogin] EnsureUserRegistered(%s) failed: %v", user.ID, err)
-			pkg.Fail(c, 500, "OpenIM用户注册失败: "+err.Error())
-			return
-		}
-
-		if user.ServiceUserID != "" {
-			if err := openIMSvc.EnsureUserRegistered(user.ServiceUserID, "客服"); err != nil {
-				log.Printf("[ClientLogin] EnsureUserRegistered(service=%s) failed: %v", user.ServiceUserID, err)
-				pkg.Fail(c, 500, "客服用户注册失败: "+err.Error())
-				return
-			}
-		}
-
-		token, err := openIMSvc.GetUserToken(user.ID)
+		token, err := pkg.GenerateToken(user.ID, false, config.Cfg.Server.JWTSecret)
 		if err != nil {
-			log.Printf("[ClientLogin] GetUserToken(%s) failed: %v", user.ID, err)
-			pkg.Fail(c, 500, "获取IM令牌失败: "+err.Error())
+			pkg.Fail(c, 500, "failed to generate token")
 			return
 		}
-
-		log.Printf("[ClientLogin] user=%s serviceUser=%s token_len=%d", user.ID, user.ServiceUserID, len(token))
 
 		pkg.Success(c, gin.H{
 			"token":         token,
+			"userId":        user.ID,
+			"nickname":      user.Nickname,
 			"serviceUserId": user.ServiceUserID,
-			"wsUrl":         config.Cfg.OpenIM.WSURL,
-			"apiUrl":        config.Cfg.OpenIM.APIURL,
 		})
 	}
 }
