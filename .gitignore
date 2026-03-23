@@ -26,6 +26,7 @@ data/
 # 配置文件（含密钥，不提交实际配置）
 # config.yaml  ← 如果是生产配置，不要提交
 # 但我们保留 server/config/config.yaml 作为模板
+server/config/config.local.yaml
 
 # 日志
 *.log

@@ -26,8 +26,15 @@ func SetupRouter(
 	// Client auth
 	r.POST("/api/client/auth/login", ClientLogin(userSvc, openIMSvc))
 
+	// Service staff auth
+	r.POST("/api/service/auth/login", ServiceLogin(openIMSvc))
+
 	// Admin auth (no JWT required)
 	r.POST("/api/admin/auth/login", AdminLogin())
+
+	// File upload/download (local storage, bypasses unresolvable MinIO hostname)
+	r.POST("/api/upload", UploadFile())
+	r.GET("/api/files/*path", ServeUploadedFiles())
 
 	// Admin routes (JWT + admin role required)
 	admin := r.Group("/api/admin", JWTAuth(), AdminRequired())
@@ -41,7 +48,7 @@ func SetupRouter(
 		admin.DELETE("/users/:id", DeleteUser(userSvc))
 
 		admin.GET("/services", ListServiceStaff())
-		admin.POST("/services", CreateServiceStaff())
+		admin.POST("/services", CreateServiceStaff(openIMSvc))
 		admin.PUT("/services/:id", UpdateServiceStaff())
 		admin.DELETE("/services/:id", DeleteServiceStaff())
 

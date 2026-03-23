@@ -4,7 +4,7 @@
     <el-table-column prop="nickname" label="昵称" min-width="120" />
     <el-table-column prop="serviceName" label="绑定客服" min-width="120">
       <template #default="{ row }">
-        {{ row.serviceName || row.serviceId || '-' }}
+        {{ row.serviceName || row.serviceUserId || '-' }}
       </template>
     </el-table-column>
     <el-table-column prop="createdAt" label="创建时间" width="180" />
@@ -29,7 +29,7 @@
 interface User {
   id: string
   nickname: string
-  serviceId: string
+  serviceUserId: string
   serviceName: string
   status: number
   createdAt: string

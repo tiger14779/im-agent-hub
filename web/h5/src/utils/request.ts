@@ -17,7 +17,20 @@ request.interceptors.request.use((config) => {
 
 // Unified error handling
 request.interceptors.response.use(
-  (response) => response.data,
+  (response) => {
+    const payload = response?.data
+
+    if (payload && payload.code !== undefined && payload.code !== null) {
+      const code = Number(payload.code)
+      if (code !== 0) {
+        const message = payload.msg || '请求失败'
+        return Promise.reject(new Error(message))
+      }
+      return payload.data
+    }
+
+    return payload
+  },
   (error) => {
     const msg =
       error.response?.data?.message ||

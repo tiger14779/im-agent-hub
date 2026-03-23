@@ -1,6 +1,8 @@
 package api
 
 import (
+	"log"
+
 	"im-agent-hub/config"
 	"im-agent-hub/pkg"
 	"im-agent-hub/service"
@@ -33,11 +35,29 @@ func ClientLogin(userSvc *service.UserService, openIMSvc *service.OpenIMService)
 			return
 		}
 
-		token, err := openIMSvc.GetUserToken(user.ID)
-		if err != nil {
-			pkg.Fail(c, 500, "failed to obtain im token: "+err.Error())
+		// Ensure the client user itself is registered in OpenIM
+		if err := openIMSvc.EnsureUserRegistered(user.ID, user.Nickname); err != nil {
+			log.Printf("[ClientLogin] EnsureUserRegistered(%s) failed: %v", user.ID, err)
+			pkg.Fail(c, 500, "OpenIM用户注册失败: "+err.Error())
 			return
 		}
+
+		if user.ServiceUserID != "" {
+			if err := openIMSvc.EnsureUserRegistered(user.ServiceUserID, "客服"); err != nil {
+				log.Printf("[ClientLogin] EnsureUserRegistered(service=%s) failed: %v", user.ServiceUserID, err)
+				pkg.Fail(c, 500, "客服用户注册失败: "+err.Error())
+				return
+			}
+		}
+
+		token, err := openIMSvc.GetUserToken(user.ID)
+		if err != nil {
+			log.Printf("[ClientLogin] GetUserToken(%s) failed: %v", user.ID, err)
+			pkg.Fail(c, 500, "获取IM令牌失败: "+err.Error())
+			return
+		}
+
+		log.Printf("[ClientLogin] user=%s serviceUser=%s token_len=%d", user.ID, user.ServiceUserID, len(token))
 
 		pkg.Success(c, gin.H{
 			"token":         token,

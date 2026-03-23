@@ -2,18 +2,18 @@ import request from '@/utils/request'
 
 export interface CreateUserRequest {
   nickname: string
-  serviceId: string
+  serviceUserId: string
 }
 
 export interface UpdateUserRequest {
   nickname?: string
-  serviceId?: string
+  serviceUserId?: string
   status?: number
 }
 
 export interface BatchCreateRequest {
   count: number
-  serviceId: string
+  serviceUserId: string
   prefix?: string
 }
 
@@ -39,7 +39,7 @@ export interface SettingsRequest {
 
 // Auth
 export const adminLogin = (username: string, password: string) =>
-  request.post('/login', { username, password })
+  request.post('/auth/login', { username, password })
 
 // Stats
 export const getStats = () => request.get('/stats')

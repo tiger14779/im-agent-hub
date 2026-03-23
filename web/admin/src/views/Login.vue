@@ -75,7 +75,19 @@ const handleLogin = async () => {
     loading.value = true
     try {
       const res = await adminLogin(form.username, form.password)
-      const { token, username } = res.data
+      const responseData = res?.data
+      const loginData = responseData?.data && typeof responseData.data === 'object'
+        ? responseData.data
+        : responseData
+
+      const token = loginData?.token
+      const username = loginData?.username
+
+      if (!token || typeof token !== 'string') {
+        ElMessage.error('登录响应异常，请重试')
+        return
+      }
+
       authStore.setAuth(token, username || form.username)
       ElMessage.success('登录成功')
       router.push('/admin/dashboard')

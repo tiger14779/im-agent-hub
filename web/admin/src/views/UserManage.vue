@@ -36,7 +36,6 @@
       />
     </div>
 
-    <!-- Create/Edit Dialog -->
     <UserForm
       :visible="formVisible"
       :user="editingUser"
@@ -45,7 +44,6 @@
       @submit="handleFormSubmit"
     />
 
-    <!-- Login Link Dialog -->
     <el-dialog v-model="linkVisible" title="用户登录链接" width="500px">
       <p style="margin-bottom: 12px; color: #606266;">用户可通过以下链接直接登录：</p>
       <el-input
@@ -60,19 +58,18 @@
       </template>
     </el-dialog>
 
-    <!-- Batch Create Dialog -->
     <el-dialog v-model="batchVisible" title="批量创建用户" width="420px">
       <el-form :model="batchForm" label-width="100px">
         <el-form-item label="创建数量">
           <el-input-number v-model="batchForm.count" :min="1" :max="100" />
         </el-form-item>
         <el-form-item label="绑定客服">
-          <el-select v-model="batchForm.serviceId" placeholder="请选择客服" style="width:100%">
+          <el-select v-model="batchForm.serviceUserId" placeholder="请选择客服" style="width:100%">
             <el-option
               v-for="svc in services"
-              :key="svc.id"
+              :key="svc.userId"
               :label="svc.nickname"
-              :value="svc.id"
+              :value="svc.userId"
             />
           </el-select>
         </el-form-item>
@@ -99,14 +96,14 @@ import UserForm from '@/components/UserForm.vue'
 interface User {
   id: string
   nickname: string
-  serviceId: string
+  serviceUserId: string
   serviceName: string
   status: number
   createdAt: string
 }
 
 interface Service {
-  id: string
+  userId: string
   nickname: string
 }
 
@@ -127,7 +124,7 @@ const batchLoading = ref(false)
 
 const batchForm = reactive({
   count: 10,
-  serviceId: '',
+  serviceUserId: '',
   prefix: ''
 })
 
@@ -163,7 +160,7 @@ const openEditDialog = (user: User) => {
   formVisible.value = true
 }
 
-const handleFormSubmit = async (formData: { nickname: string; serviceId: string }) => {
+const handleFormSubmit = async (formData: { nickname: string; serviceUserId: string }) => {
   try {
     if (editingUser.value) {
       await updateUser(editingUser.value.id, formData)
@@ -197,7 +194,13 @@ const handleDelete = async (user: User) => {
 }
 
 const showLoginLink = (user: User) => {
-  loginLink.value = `${window.location.origin}/chat?id=${user.id}`
+  const { protocol, hostname, port, origin } = window.location
+  const isLocal = hostname === 'localhost' || hostname === '127.0.0.1'
+  const h5BaseURL = isLocal && port === '3001'
+    ? `${protocol}//${hostname}:3000`
+    : origin
+
+  loginLink.value = `${h5BaseURL}/chat?id=${user.id}`
   linkVisible.value = true
 }
 
@@ -211,7 +214,7 @@ const copyLink = async () => {
 }
 
 const handleBatchCreate = async () => {
-  if (!batchForm.serviceId) {
+  if (!batchForm.serviceUserId) {
     ElMessage.warning('请选择绑定客服')
     return
   }

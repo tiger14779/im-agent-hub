@@ -13,12 +13,12 @@
         <el-input v-model="form.nickname" placeholder="请输入用户昵称" />
       </el-form-item>
       <el-form-item label="绑定客服" prop="serviceId">
-        <el-select v-model="form.serviceId" placeholder="请选择客服" style="width: 100%">
+        <el-select v-model="form.serviceUserId" placeholder="请选择客服" style="width: 100%">
           <el-option
             v-for="svc in services"
-            :key="svc.id"
+            :key="svc.userId"
             :label="svc.nickname"
-            :value="svc.id"
+            :value="svc.userId"
           />
         </el-select>
       </el-form-item>
@@ -39,14 +39,14 @@ import type { FormInstance, FormRules } from 'element-plus'
 interface User {
   id: string
   nickname: string
-  serviceId: string
+  serviceUserId: string
   serviceName: string
   status: number
   createdAt: string
 }
 
 interface Service {
-  id: string
+  userId: string
   nickname: string
 }
 
@@ -58,13 +58,13 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   close: []
-  submit: [data: { nickname: string; serviceId: string }]
+  submit: [data: { nickname: string; serviceUserId: string }]
 }>()
 
 const formRef = ref<FormInstance>()
 const form = reactive({
   nickname: '',
-  serviceId: ''
+  serviceUserId: ''
 })
 
 // Generate a stable preview ID once per dialog open (not recomputed on every render)
@@ -72,17 +72,17 @@ const previewId = ref('')
 
 const rules: FormRules = {
   nickname: [{ required: true, message: '请输入昵称', trigger: 'blur' }],
-  serviceId: [{ required: true, message: '请选择绑定客服', trigger: 'change' }]
+  serviceUserId: [{ required: true, message: '请选择绑定客服', trigger: 'change' }]
 }
 
 watch(() => props.visible, (val) => {
   if (val) {
     if (props.user) {
       form.nickname = props.user.nickname
-      form.serviceId = props.user.serviceId
+      form.serviceUserId = props.user.serviceUserId
     } else {
       form.nickname = ''
-      form.serviceId = ''
+      form.serviceUserId = ''
       previewId.value = 'user_' + Math.random().toString(36).substring(2, 10)
     }
   }
@@ -92,7 +92,7 @@ const handleSubmit = async () => {
   if (!formRef.value) return
   await formRef.value.validate((valid) => {
     if (valid) {
-      emit('submit', { nickname: form.nickname, serviceId: form.serviceId })
+      emit('submit', { nickname: form.nickname, serviceUserId: form.serviceUserId })
     }
   })
 }

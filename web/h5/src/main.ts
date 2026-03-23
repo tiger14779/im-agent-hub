@@ -4,6 +4,7 @@ import App from './App.vue'
 import router from './router'
 import './styles/reset.css'
 import './styles/variables.css'
+import './styles/chat.css'
 
 const app = createApp(App)
 app.use(createPinia())

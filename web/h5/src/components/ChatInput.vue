@@ -42,6 +42,7 @@
     <!-- Attachment popup -->
     <transition name="slide-up">
       <div v-if="showAttach" class="attach-popup">
+        <button class="attach-close-btn" @click="showAttach = false">✕</button>
         <label class="attach-item">
           <div class="attach-item-icon">🖼️</div>
           <span>图片</span>
@@ -182,6 +183,24 @@ onUnmounted(() => {
 .slide-up-leave-to {
   opacity: 0;
   transform: translateY(100%);
+}
+
+/* Close button in attachment panel */
+.attach-close-btn {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 50%;
+  font-size: 14px;
+  color: var(--wechat-text-secondary, #999);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
 }
 
 /* Recording overlay */

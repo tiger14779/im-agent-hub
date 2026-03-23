@@ -26,6 +26,9 @@
       <MessageList
         :messages="chatStore.messages"
         :my-id="userStore.userId"
+        :loading-more="loadingMore"
+        :has-more="chatStore.hasMore"
+        @load-more="onLoadMore"
       />
 
       <!-- Chat input -->
@@ -59,6 +62,8 @@ const chatStore = useChatStore()
 const state = ref<PageState>('loading')
 const errorMsg = ref('')
 const serviceUserName = ref('客服')
+const currentConversationID = ref('')
+const loadingMore = ref(false)
 
 /** Parse a raw SDK message into our Message type */
 function parseMessage(raw: Record<string, unknown>): Message {
@@ -83,17 +88,37 @@ function parseMessage(raw: Record<string, unknown>): Message {
     status: Number(raw.status ?? 2)
   }
 
-  try {
-    const parsed: Record<string, unknown> = typeof content === 'string' ? JSON.parse(content) : content
-    if (contentType === 101) msg.textContent = parsed.content as string ?? content
-    else if (contentType === 102) msg.pictureContent = parsed as Message['pictureContent']
-    else if (contentType === 103) msg.voiceContent = parsed as Message['voiceContent']
-    else if (contentType === 105) msg.fileContent = parsed as Message['fileContent']
-  } catch {
-    msg.textContent = content
+  // SDK returns rich fields like textElem, pictureElem, etc.
+  const textElem = raw.textElem as Record<string, unknown> | undefined
+  const pictureElem = raw.pictureElem as Record<string, unknown> | undefined
+  const soundElem = raw.soundElem as Record<string, unknown> | undefined
+  const fileElem = raw.fileElem as Record<string, unknown> | undefined
+
+  if (contentType === 101) {
+    // Priority: textElem.content > parsed content JSON > raw content string
+    if (textElem && typeof textElem.content === 'string') {
+      msg.textContent = textElem.content
+    } else {
+      try {
+        const parsed = typeof content === 'string' ? JSON.parse(content) : content
+        msg.textContent = (parsed as Record<string, unknown>).content as string || content
+      } catch {
+        msg.textContent = content
+      }
+    }
+  } else if (contentType === 102) {
+    msg.pictureContent = (pictureElem as Message['pictureContent']) ?? tryParseJSON(content)
+  } else if (contentType === 103) {
+    msg.voiceContent = (soundElem as Message['voiceContent']) ?? tryParseJSON(content)
+  } else if (contentType === 105) {
+    msg.fileContent = (fileElem as Message['fileContent']) ?? tryParseJSON(content)
   }
 
   return msg
+}
+
+function tryParseJSON(s: string): Record<string, unknown> | undefined {
+  try { return JSON.parse(s) } catch { return undefined }
 }
 
 async function init() {
@@ -109,31 +134,35 @@ async function init() {
   chatStore.clearMessages()
 
   try {
-    // 1. Authenticate via backend
-    userStore.loadFromStorage()
-    if (!userStore.isLoggedIn) {
-      const res = await request.post<unknown, {
-        token: string
-        wsUrl?: string
-        apiUrl?: string
-        serviceUserId?: string
-        serviceUserName?: string
-      }>('/client/auth/login', { userId: targetId })
+    // 1. Authenticate via backend (always refresh to avoid stale local cache)
+    const res = await request.post<unknown, {
+      token: string
+      wsUrl?: string
+      apiUrl?: string
+      serviceUserId?: string
+      serviceUserName?: string
+    }>('/client/auth/login', { userId: targetId })
 
-      userStore.login({
-        userId: targetId,
-        token: res.token,
-        serviceUserId: res.serviceUserId,
-        wsUrl: res.wsUrl,
-        apiUrl: res.apiUrl
-      })
+    userStore.login({
+      userId: targetId,
+      token: res.token,
+      serviceUserId: res.serviceUserId,
+      wsUrl: res.wsUrl,
+      apiUrl: res.apiUrl
+    })
 
-      serviceUserName.value = res.serviceUserName ?? '客服'
-    }
+    serviceUserName.value = res.serviceUserName ?? '客服'
 
-    const wsUrl = userStore.wsUrl || 'ws://localhost:10001'
-    const apiUrl = userStore.apiUrl || 'http://localhost:10002'
+    const wsUrl = userStore.wsUrl
+    const apiUrl = userStore.apiUrl
     const serviceId = userStore.serviceUserId || targetId
+
+    if (!userStore.token) {
+      throw new Error('登录令牌缺失，请重新进入聊天链接')
+    }
+    if (!wsUrl || !apiUrl) {
+      throw new Error('OpenIM 连接地址缺失，请检查后端登录接口返回')
+    }
 
     // 2. Initialise & login to OpenIM SDK
     await openIMService.init(wsUrl, apiUrl)
@@ -145,16 +174,58 @@ async function init() {
       chatStore.addMessage(msg)
     }
 
-    // 4. Load recent history
-    const history = await openIMService.getHistoryMessages(serviceId)
-    const parsed = (history as Record<string, unknown>[]).map(parseMessage)
-    chatStore.loadHistory(parsed)
+    // Wait for SDK connection to be fully established
+    await openIMService.waitForConnection()
 
     state.value = 'ready'
+
+    // 4. Load recent history (non-blocking — don't let failures prevent chatting)
+    try {
+      const conversationID = await openIMService.getConversationID(serviceId)
+      currentConversationID.value = conversationID
+      if (conversationID) {
+        const history = await openIMService.getHistoryMessages(conversationID)
+        const parsed = (history as Record<string, unknown>[]).map(parseMessage)
+        chatStore.loadHistory(parsed)
+        if (parsed.length < 20) {
+          chatStore.hasMore = false
+        }
+      }
+    } catch (histErr) {
+      console.warn('[Chat] load history failed (non-fatal)', histErr)
+    }
   } catch (err) {
     console.error('[Chat] init failed', err)
     errorMsg.value = (err as Error).message || '连接失败，请重试'
     state.value = 'error'
+  }
+}
+
+async function onLoadMore() {
+  if (loadingMore.value || !chatStore.hasMore || !currentConversationID.value) return
+  loadingMore.value = true
+  try {
+    // Use the oldest message's clientMsgID as the cursor
+    const oldest = chatStore.messages[0]
+    const startMsgID = oldest?.clientMsgID ?? ''
+    const history = await openIMService.getHistoryMessages(
+      currentConversationID.value,
+      startMsgID,
+      20
+    )
+    const parsed = (history as Record<string, unknown>[]).map(parseMessage)
+    if (parsed.length === 0) {
+      chatStore.hasMore = false
+    } else {
+      chatStore.loadHistory(parsed)
+      if (parsed.length < 20) {
+        chatStore.hasMore = false
+      }
+    }
+  } catch (err) {
+    console.warn('[Chat] load more history failed', err)
+  } finally {
+    loadingMore.value = false
   }
 }
 
@@ -176,7 +247,8 @@ async function onSendText(text: string) {
   try {
     const sent = await openIMService.sendTextMessage(serviceId, text)
     chatStore.updateMessageStatus(tempMsg.clientMsgID, 2, (sent as { serverMsgID?: string })?.serverMsgID)
-  } catch {
+  } catch (err) {
+    console.error('[Chat] send text failed', { serviceId, err })
     chatStore.updateMessageStatus(tempMsg.clientMsgID, 3)
   }
 }
@@ -199,7 +271,8 @@ async function onSendImage(file: File) {
   try {
     await openIMService.sendImageMessage(serviceId, file)
     chatStore.updateMessageStatus(tempMsg.clientMsgID, 2)
-  } catch {
+  } catch (err) {
+    console.error('[Chat] send image failed', { serviceId, err })
     chatStore.updateMessageStatus(tempMsg.clientMsgID, 3)
   }
 }
@@ -221,7 +294,8 @@ async function onSendFile(file: File) {
   try {
     await openIMService.sendFileMessage(serviceId, file)
     chatStore.updateMessageStatus(tempMsg.clientMsgID, 2)
-  } catch {
+  } catch (err) {
+    console.error('[Chat] send file failed', { serviceId, err })
     chatStore.updateMessageStatus(tempMsg.clientMsgID, 3)
   }
 }
@@ -244,7 +318,8 @@ async function onSendVoice({ blob, duration }: { blob: Blob; duration: number })
   try {
     await openIMService.sendVoiceMessage(serviceId, blob, duration)
     chatStore.updateMessageStatus(tempMsg.clientMsgID, 2)
-  } catch {
+  } catch (err) {
+    console.error('[Chat] send voice failed', { serviceId, err })
     chatStore.updateMessageStatus(tempMsg.clientMsgID, 3)
   }
 }

@@ -4,6 +4,7 @@
       :src="thumbUrl"
       alt="图片"
       class="msg-image"
+      @load="loading = false"
       @error="onImgError"
     />
     <div v-if="loading" class="img-loading">加载中…</div>

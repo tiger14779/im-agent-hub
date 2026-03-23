@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 
 	"im-agent-hub/api"
 	"im-agent-hub/config"
@@ -11,7 +12,17 @@ import (
 )
 
 func main() {
-	config.LoadConfig("./config/config.yaml")
+	configPath := os.Getenv("IM_AGENT_HUB_CONFIG")
+	if configPath == "" {
+		if _, err := os.Stat("./config/config.local.yaml"); err == nil {
+			configPath = "./config/config.local.yaml"
+		} else {
+			configPath = "./config/config.yaml"
+		}
+	}
+
+	config.LoadConfig(configPath)
+	log.Printf("config loaded from %s", configPath)
 
 	database.Init()
 

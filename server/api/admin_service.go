@@ -4,6 +4,7 @@ import (
 	"im-agent-hub/database"
 	"im-agent-hub/model"
 	"im-agent-hub/pkg"
+	"im-agent-hub/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -27,11 +28,16 @@ type createStaffReq struct {
 }
 
 // CreateServiceStaff handles POST /api/admin/services
-func CreateServiceStaff() gin.HandlerFunc {
+func CreateServiceStaff(openIMSvc *service.OpenIMService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req createStaffReq
 		if err := c.ShouldBindJSON(&req); err != nil {
 			pkg.Fail(c, 400, "userId and nickname are required")
+			return
+		}
+
+		if err := openIMSvc.EnsureUserRegistered(req.UserID, req.Nickname); err != nil {
+			pkg.Fail(c, 500, "register service staff in openim failed: "+err.Error())
 			return
 		}
 
