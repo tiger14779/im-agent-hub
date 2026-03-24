@@ -9,14 +9,10 @@
 struct Contact {
     QString userId;
     QString nickname;
-    QString remark;
     QString avatarUrl;
     QString lastMessage;
     qint64 lastTime = 0;
     int unreadCount = 0;
-
-    // Display name: use remark if set, otherwise nickname
-    QString displayName() const { return remark.isEmpty() ? nickname : remark; }
 };
 
 class ContactModel : public QAbstractListModel
@@ -24,13 +20,12 @@ class ContactModel : public QAbstractListModel
     Q_OBJECT
     QML_ELEMENT
     Q_PROPERTY(int count READ count NOTIFY countChanged)
+    Q_PROPERTY(int totalUnread READ totalUnread NOTIFY totalUnreadChanged)
 
 public:
     enum Roles {
         UserIdRole = Qt::UserRole + 1,
         NicknameRole,
-        RemarkRole,
-        DisplayNameRole,
         AvatarUrlRole,
         LastMessageRole,
         LastTimeRole,
@@ -44,24 +39,27 @@ public:
     QHash<int, QByteArray> roleNames() const override;
 
     int count() const { return m_contacts.size(); }
+    int totalUnread() const;
 
     // Load contacts from server JSON array
     Q_INVOKABLE void loadFromJson(const QJsonArray &arr);
 
     Q_INVOKABLE void addOrUpdate(const QString &userId, const QString &nickname,
-                                  const QString &remark = {}, const QString &avatarUrl = {});
-    Q_INVOKABLE void updateRemark(const QString &userId, const QString &remark);
+                                  const QString &avatarUrl = {});
+    Q_INVOKABLE void updateNickname(const QString &userId, const QString &nickname);
     Q_INVOKABLE void updateAvatar(const QString &userId, const QString &avatarUrl);
     Q_INVOKABLE void updateLastMessage(const QString &userId, const QString &text, qint64 time);
     Q_INVOKABLE void incrementUnread(const QString &userId);
     Q_INVOKABLE void clearUnread(const QString &userId);
     Q_INVOKABLE void clear();
 
-    Q_INVOKABLE QString getDisplayName(const QString &userId) const;
+    Q_INVOKABLE QString getNickname(const QString &userId) const;
     Q_INVOKABLE QString getAvatar(const QString &userId) const;
+    Q_INVOKABLE QJsonArray toJsonArray() const;
 
 signals:
     void countChanged();
+    void totalUnreadChanged();
 
 private:
     int findByUserId(const QString &userId) const;

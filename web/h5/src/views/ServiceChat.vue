@@ -122,7 +122,7 @@ function parseContent(m: Message): Message {
   try {
     const parsed = JSON.parse(m.content)
     if (m.contentType === 101) msg.textContent = parsed.text ?? parsed.content ?? m.content
-    else if (m.contentType === 102) msg.pictureContent = { sourcePicture: { url: parsed.url }, snapshotPicture: { url: parsed.url } }
+    else if (m.contentType === 102) { const imgUrl = parsed.url ?? parsed.sourcePicture?.url ?? ''; msg.pictureContent = { sourcePicture: { url: imgUrl }, snapshotPicture: { url: imgUrl } } }
     else if (m.contentType === 103) msg.voiceContent = { sourceUrl: parsed.url, duration: parsed.duration }
     else if (m.contentType === 105) msg.fileContent = { sourceUrl: parsed.url, fileName: parsed.name, fileSize: parsed.size, fileType: parsed.type }
   } catch {

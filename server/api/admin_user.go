@@ -33,10 +33,11 @@ func ListUsers(svc *service.UserService) gin.HandlerFunc {
 type createUserReq struct {
 	Nickname      string `json:"nickname" binding:"required"`
 	ServiceUserID string `json:"serviceUserId" binding:"required"`
+	Avatar        string `json:"avatar"`
 }
 
 // CreateUser handles POST /api/admin/users
-func CreateUser(svc *service.UserService) gin.HandlerFunc {
+func CreateUser(svc *service.UserService, chatHub *ChatHub) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req createUserReq
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -49,6 +50,11 @@ func CreateUser(svc *service.UserService) gin.HandlerFunc {
 			pkg.Fail(c, 500, err.Error())
 			return
 		}
+		if req.Avatar != "" {
+			svc.UpdateAvatar(user.ID, req.Avatar)
+			user.Avatar = req.Avatar
+		}
+		chatHub.NotifyContactsUpdated(req.ServiceUserID)
 		pkg.Success(c, user)
 	}
 }
@@ -56,10 +62,11 @@ func CreateUser(svc *service.UserService) gin.HandlerFunc {
 type updateUserReq struct {
 	Nickname      string `json:"nickname" binding:"required"`
 	ServiceUserID string `json:"serviceUserId" binding:"required"`
+	Avatar        string `json:"avatar"`
 }
 
 // UpdateUser handles PUT /api/admin/users/:id
-func UpdateUser(svc *service.UserService) gin.HandlerFunc {
+func UpdateUser(svc *service.UserService, chatHub *ChatHub) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
 		var req updateUserReq
@@ -73,17 +80,27 @@ func UpdateUser(svc *service.UserService) gin.HandlerFunc {
 			pkg.Fail(c, 404, err.Error())
 			return
 		}
+		if req.Avatar != "" {
+			svc.UpdateAvatar(user.ID, req.Avatar)
+			user.Avatar = req.Avatar
+		}
+		chatHub.NotifyContactsUpdated(req.ServiceUserID)
 		pkg.Success(c, user)
 	}
 }
 
 // DeleteUser handles DELETE /api/admin/users/:id
-func DeleteUser(svc *service.UserService) gin.HandlerFunc {
+func DeleteUser(svc *service.UserService, chatHub *ChatHub) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
+		// Look up the user's serviceUserId before deleting
+		user, _ := svc.GetUserByID(id)
 		if err := svc.DeleteUser(id); err != nil {
 			pkg.Fail(c, 404, err.Error())
 			return
+		}
+		if user != nil && user.ServiceUserID != "" {
+			chatHub.NotifyContactsUpdated(user.ServiceUserID)
 		}
 		pkg.Success(c, nil)
 	}
@@ -95,7 +112,7 @@ type batchCreateReq struct {
 }
 
 // BatchCreateUsers handles POST /api/admin/users/batch
-func BatchCreateUsers(svc *service.UserService) gin.HandlerFunc {
+func BatchCreateUsers(svc *service.UserService, chatHub *ChatHub) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req batchCreateReq
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -108,6 +125,7 @@ func BatchCreateUsers(svc *service.UserService) gin.HandlerFunc {
 			pkg.Fail(c, 500, err.Error())
 			return
 		}
+		chatHub.NotifyContactsUpdated(req.ServiceUserID)
 		pkg.Success(c, gin.H{"list": users, "total": len(users)})
 	}
 }

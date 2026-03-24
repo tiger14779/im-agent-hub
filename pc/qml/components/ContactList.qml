@@ -7,6 +7,7 @@ ListView {
     clip: true
 
     property string activeUserId: ""
+    property string serverUrl: ""
     signal contactClicked(string cUserId)
     signal contactRightClicked(string cUserId)
 
@@ -46,7 +47,12 @@ ListView {
                 Image {
                     id: avatarImg
                     anchors.fill: parent
-                    source: model.avatarUrl || ""
+                    source: {
+                        var url = model.avatarUrl || ""
+                        if (url.length > 0 && url.charAt(0) === '/')
+                            return contactList.serverUrl + url
+                        return url
+                    }
                     visible: status === Image.Ready
                     fillMode: Image.PreserveAspectCrop
                     layer.enabled: true
@@ -55,7 +61,7 @@ ListView {
 
                 Label {
                     anchors.centerIn: parent
-                    text: (model.displayName || model.userId || "?").charAt(0).toUpperCase()
+                    text: (model.nickname || model.userId || "?").charAt(0).toUpperCase()
                     color: "white"
                     font.pixelSize: 16
                     font.bold: true
@@ -72,7 +78,7 @@ ListView {
                     Layout.fillWidth: true
 
                     Label {
-                        text: model.displayName || model.userId
+                        text: model.nickname || model.userId
                         color: "#333"
                         font.pixelSize: 13
                         elide: Text.ElideRight

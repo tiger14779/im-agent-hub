@@ -98,12 +98,16 @@ Rectangle {
                         border.color: msgInput.activeFocus ? "#07c160" : "#e0e0e0"
                     }
 
-                    Keys.onReturnPressed: function(event) {
-                        if (event.modifiers & Qt.ShiftModifier) {
-                            event.accepted = false
-                        } else {
-                            event.accepted = true
-                            doSend()
+                    Keys.onPressed: function(event) {
+                        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                            if (event.modifiers & Qt.ShiftModifier) {
+                                // Shift+Enter: insert newline
+                                event.accepted = false
+                            } else {
+                                // Enter: send
+                                event.accepted = true
+                                doSend()
+                            }
                         }
                     }
                 }

@@ -18,6 +18,16 @@ WsClient::WsClient(QObject *parent)
     connect(&m_reconnectTimer, &QTimer::timeout, this, &WsClient::tryReconnect);
 }
 
+WsClient::~WsClient()
+{
+    m_reconnectTimer.stop();
+    m_reconnectTimer.disconnect();
+    m_baseUrl.clear();            // prevent reconnect in onDisconnected
+    m_ws.disconnect();            // detach all signals
+    if (m_ws.state() != QAbstractSocket::UnconnectedState)
+        m_ws.close();
+}
+
 void WsClient::connectToServer(const QString &baseUrl, const QString &staffId, const QString &token)
 {
     m_baseUrl = baseUrl;
@@ -93,7 +103,6 @@ void WsClient::onDisconnected()
     emit connectedChanged();
     if (!m_baseUrl.isEmpty())
 
-
     m_reconnectTimer.start();
 }
 
@@ -134,5 +143,7 @@ void WsClient::handleWsMessage(const QJsonObject &envelope)
         QString peerUserId = data["peerUserId"].toString();
         QJsonArray messages = data["messages"].toArray();
         emit historyLoaded(peerUserId, messages);
+    } else if (type == "contacts_updated") {
+        emit contactsUpdated();
     }
 }

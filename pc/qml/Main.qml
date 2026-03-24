@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import ImAgentHub
 
 ApplicationWindow {
     id: root
@@ -9,8 +10,13 @@ ApplicationWindow {
     minimumWidth: 860
     minimumHeight: 540
     visible: true
-    title: "IM Agent Hub - 客服端"
+    title: "IM Agent Hub - \u5BA2\u670D\u7AEF"
     color: "#ebebeb"
+
+    onClosing: function(close) {
+        WxBridge.stopServer()
+        WsClient.disconnect()
+    }
 
     // ── Global state ───────────────────────────────────
     property string staffUserId: ""

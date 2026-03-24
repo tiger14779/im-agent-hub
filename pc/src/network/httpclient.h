@@ -7,6 +7,8 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QTemporaryDir>
+#include <QSettings>
+#include <QHash>
 #include <QtQml/qqmlregistration.h>
 
 class HttpClient : public QObject
@@ -20,6 +22,7 @@ class HttpClient : public QObject
 
 public:
     explicit HttpClient(QObject *parent = nullptr);
+    ~HttpClient() override;
 
     QString baseUrl() const { return m_baseUrl; }
     void setBaseUrl(const QString &url);
@@ -38,18 +41,23 @@ public:
     // GET /api/service/contacts
     Q_INVOKABLE void getContacts();
     // POST /api/service/contacts  (add user)
-    Q_INVOKABLE void addContact(const QString &nickname, const QString &remark, const QString &avatar);
-    // PUT /api/service/contacts/:userId  (update remark/avatar)
-    Q_INVOKABLE void updateContact(const QString &userId, const QString &remark, const QString &avatar);
+    Q_INVOKABLE void addContact(const QString &nickname, const QString &avatar);
+    // PUT /api/service/contacts/:userId  (update nickname/avatar)
+    Q_INVOKABLE void updateContact(const QString &userId, const QString &nickname, const QString &avatar);
 
     // === File upload ===
     Q_INVOKABLE void uploadFile(const QString &filePath);
+    Q_INVOKABLE void uploadAvatar(const QString &filePath);
 
     // === File download ===
     // Download and open with system default application
     Q_INVOKABLE void downloadAndOpen(const QString &url, const QString &fileName);
     // Download to a specific save path
     Q_INVOKABLE void downloadToPath(const QString &url, const QString &savePath);
+
+    // === Settings ===
+    Q_INVOKABLE void saveLoginConfig(const QString &userId, const QString &serverUrl);
+    Q_INVOKABLE QJsonObject loadLoginConfig();
 
 signals:
     void baseUrlChanged();
@@ -67,8 +75,9 @@ signals:
     void contactError(const QString &error);
 
     // Upload
-    void uploadSuccess(const QString &url);
+    void uploadSuccess(const QString &url, const QString &fileName, qint64 fileSize);
     void uploadFailed(const QString &error);
+    void avatarUploaded(const QString &url);
 
     // Download
     void downloadFinished(const QString &localPath);
@@ -85,6 +94,9 @@ private:
     QString m_token;
     QString m_serviceUserId;
     QTemporaryDir m_tempDir;
+
+    // Upload cache: key = "path|size|lastModified" → server URL
+    QHash<QString, QString> m_uploadCache;
 };
 
 #endif // HTTPCLIENT_H

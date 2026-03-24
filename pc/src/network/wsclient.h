@@ -17,6 +17,7 @@ class WsClient : public QObject
 
 public:
     explicit WsClient(QObject *parent = nullptr);
+    ~WsClient() override;
 
     bool isConnected() const { return m_connected; }
 
@@ -39,6 +40,8 @@ signals:
     void messageAck(const QString &clientMsgId, int status, const QString &serverMsgId, qint64 sendTime);
     // Message history loaded
     void historyLoaded(const QString &peerUserId, const QJsonArray &messages);
+    // Contacts list changed on server
+    void contactsUpdated();
     // Connection error
     void connectionError(const QString &error);
 

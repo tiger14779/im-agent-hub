@@ -23,6 +23,7 @@ set(SOURCES
     src/models/contactmodel.cpp
     src/network/httpclient.cpp
     src/network/wsclient.cpp
+    src/network/wxbridge.cpp
 )
 
 set(HEADERS
@@ -30,6 +31,7 @@ set(HEADERS
     src/models/contactmodel.h
     src/network/httpclient.h
     src/network/wsclient.h
+    src/network/wxbridge.h
 )
 
 # ── QML files ────────────────────────────────────────────

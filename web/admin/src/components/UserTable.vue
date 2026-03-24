@@ -1,6 +1,13 @@
 <template>
   <el-table :data="users" v-loading="loading" border stripe>
     <el-table-column prop="id" label="ID" width="200" show-overflow-tooltip />
+    <el-table-column label="头像" width="70" align="center">
+      <template #default="{ row }">
+        <el-avatar :size="36" :src="row.avatar || undefined">
+          {{ (row.nickname || '?').charAt(0) }}
+        </el-avatar>
+      </template>
+    </el-table-column>
     <el-table-column prop="nickname" label="昵称" min-width="120" />
     <el-table-column prop="serviceName" label="绑定客服" min-width="120">
       <template #default="{ row }">

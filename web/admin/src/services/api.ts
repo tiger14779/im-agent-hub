@@ -3,12 +3,14 @@ import request from '@/utils/request'
 export interface CreateUserRequest {
   nickname: string
   serviceUserId: string
+  avatar?: string
 }
 
 export interface UpdateUserRequest {
   nickname?: string
   serviceUserId?: string
   status?: number
+  avatar?: string
 }
 
 export interface BatchCreateRequest {
@@ -82,3 +84,13 @@ export const updateSettings = (data: SettingsRequest) =>
 
 export const changePassword = (currentPassword: string, newPassword: string) =>
   request.put('/password', { currentPassword, newPassword })
+
+// Upload file (uses /api/upload, not /api/admin/upload)
+export const uploadFile = (file: File) => {
+  const formData = new FormData()
+  formData.append('file', file)
+  return request.post('/upload', formData, {
+    baseURL: '/api',
+    headers: { 'Content-Type': 'multipart/form-data' }
+  })
+}

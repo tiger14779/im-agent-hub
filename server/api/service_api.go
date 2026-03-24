@@ -23,20 +23,44 @@ func ServiceGetContacts() gin.HandlerFunc {
 		database.DB.Where("service_user_id = ? AND status = 1", staffID).
 			Order("updated_at desc").Find(&users)
 
+		// Build a map of conversations for this staff member
+		var convs []model.Conversation
+		database.DB.Where("user_a = ? OR user_b = ?", staffID, staffID).Find(&convs)
+		convMap := make(map[string]*model.Conversation, len(convs))
+		for i := range convs {
+			// Key by the peer user ID
+			peer := convs[i].UserA
+			if peer == staffID {
+				peer = convs[i].UserB
+			}
+			convMap[peer] = &convs[i]
+		}
+
 		type contactItem struct {
-			UserID   string `json:"userId"`
-			Nickname string `json:"nickname"`
-			Remark   string `json:"remark"`
-			Avatar   string `json:"avatar"`
+			UserID      string `json:"userId"`
+			Nickname    string `json:"nickname"`
+			Avatar      string `json:"avatar"`
+			UnreadCount int    `json:"unreadCount"`
+			LastMessage string `json:"lastMessage"`
+			LastTime    int64  `json:"lastTime"`
 		}
 		list := make([]contactItem, 0, len(users))
 		for _, u := range users {
-			list = append(list, contactItem{
+			item := contactItem{
 				UserID:   u.ID,
 				Nickname: u.Nickname,
-				Remark:   u.Remark,
 				Avatar:   u.Avatar,
-			})
+			}
+			if conv, ok := convMap[u.ID]; ok {
+				if staffID == conv.UserA {
+					item.UnreadCount = conv.UnreadA
+				} else {
+					item.UnreadCount = conv.UnreadB
+				}
+				item.LastMessage = conv.LastMsgContent
+				item.LastTime = conv.LastMsgTime
+			}
+			list = append(list, item)
 		}
 
 		pkg.Success(c, list)
@@ -45,7 +69,7 @@ func ServiceGetContacts() gin.HandlerFunc {
 
 // ServiceAddUser creates a new user directly under the current service staff.
 // POST /api/service/contacts
-func ServiceAddUser(userSvc *service.UserService) gin.HandlerFunc {
+func ServiceAddUser(userSvc *service.UserService, chatHub *ChatHub) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		staffID := c.GetString("serviceUserId")
 		if staffID == "" {
@@ -55,7 +79,6 @@ func ServiceAddUser(userSvc *service.UserService) gin.HandlerFunc {
 
 		var req struct {
 			Nickname string `json:"nickname" binding:"required"`
-			Remark   string `json:"remark"`
 			Avatar   string `json:"avatar"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -69,28 +92,22 @@ func ServiceAddUser(userSvc *service.UserService) gin.HandlerFunc {
 			return
 		}
 
-		// Update remark and avatar if provided
-		updates := map[string]interface{}{}
-		if req.Remark != "" {
-			updates["remark"] = req.Remark
-		}
+		// Update avatar if provided
 		if req.Avatar != "" {
-			updates["avatar"] = req.Avatar
+			database.DB.Model(&model.User{}).Where("id = ?", user.ID).Updates(map[string]interface{}{"avatar": req.Avatar})
 		}
-		if len(updates) > 0 {
-			database.DB.Model(&model.User{}).Where("id = ?", user.ID).Updates(updates)
-		}
+
+		chatHub.NotifyContactsUpdated(staffID)
 
 		pkg.Success(c, gin.H{
 			"userId":   user.ID,
 			"nickname": user.Nickname,
-			"remark":   req.Remark,
 			"avatar":   req.Avatar,
 		})
 	}
 }
 
-// ServiceUpdateContact updates the remark and/or avatar for a user.
+// ServiceUpdateContact updates the nickname and/or avatar for a user.
 // PUT /api/service/contacts/:userId
 func ServiceUpdateContact() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -105,8 +122,8 @@ func ServiceUpdateContact() gin.HandlerFunc {
 		}
 
 		var req struct {
-			Remark *string `json:"remark"`
-			Avatar *string `json:"avatar"`
+			Nickname *string `json:"nickname"`
+			Avatar   *string `json:"avatar"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			pkg.Fail(c, 400, "invalid request")
@@ -114,8 +131,8 @@ func ServiceUpdateContact() gin.HandlerFunc {
 		}
 
 		updates := map[string]interface{}{}
-		if req.Remark != nil {
-			updates["remark"] = *req.Remark
+		if req.Nickname != nil {
+			updates["nickname"] = *req.Nickname
 		}
 		if req.Avatar != nil {
 			updates["avatar"] = *req.Avatar
@@ -132,7 +149,6 @@ func ServiceUpdateContact() gin.HandlerFunc {
 		pkg.Success(c, gin.H{
 			"userId":   user.ID,
 			"nickname": user.Nickname,
-			"remark":   user.Remark,
 			"avatar":   user.Avatar,
 		})
 	}

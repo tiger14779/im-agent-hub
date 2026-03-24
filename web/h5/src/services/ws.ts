@@ -166,7 +166,8 @@ class ChatWsService {
       if (contentType === 101) {
         msg.textContent = parsed.text ?? parsed.content ?? content
       } else if (contentType === 102) {
-        msg.pictureContent = { sourcePicture: { url: parsed.url }, snapshotPicture: { url: parsed.url } }
+        const imgUrl = parsed.url ?? parsed.sourcePicture?.url ?? ''
+        msg.pictureContent = { sourcePicture: { url: imgUrl }, snapshotPicture: { url: imgUrl } }
       } else if (contentType === 103) {
         msg.voiceContent = { sourceUrl: parsed.url, duration: parsed.duration }
       } else if (contentType === 105) {

@@ -5,7 +5,6 @@ import "time"
 type User struct {
 	ID            string    `gorm:"primaryKey" json:"id"`
 	Nickname      string    `json:"nickname"`
-	Remark        string    `json:"remark"` // 客服备注名
 	Avatar        string    `json:"avatar"` // 头像 URL
 	ServiceUserID string    `json:"serviceUserId"`
 	Status        int       `json:"status"` // 1=active, 0=disabled

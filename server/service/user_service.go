@@ -96,6 +96,11 @@ func (s *UserService) GetUserByID(id string) (*model.User, error) {
 	return &user, nil
 }
 
+// UpdateAvatar sets the avatar URL for a user.
+func (s *UserService) UpdateAvatar(id, avatar string) {
+	database.DB.Model(&model.User{}).Where("id = ?", id).Update("avatar", avatar)
+}
+
 // BatchCreateUsers creates multiple users assigned to the same service staff.
 func (s *UserService) BatchCreateUsers(count int, serviceUserID string) ([]model.User, error) {
 	users := make([]model.User, 0, count)

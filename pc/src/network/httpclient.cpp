@@ -17,6 +17,18 @@ HttpClient::HttpClient(QObject *parent)
 {
 }
 
+HttpClient::~HttpClient()
+{
+    // Abort all pending network replies to prevent [this] lambda callbacks
+    // from firing after destruction
+    const auto replies = findChildren<QNetworkReply*>();
+    for (QNetworkReply *reply : replies) {
+        reply->disconnect();   // detach finished signal
+        reply->abort();
+        reply->deleteLater();
+    }
+}
+
 void HttpClient::setBaseUrl(const QString &url)
 {
     if (m_baseUrl != url) {
@@ -90,12 +102,11 @@ void HttpClient::getContacts()
         [this](const QString &err) { emit contactError(err); });
 }
 
-void HttpClient::addContact(const QString &nickname, const QString &remark, const QString &avatar)
+void HttpClient::addContact(const QString &nickname, const QString &avatar)
 {
     QNetworkRequest req = authedRequest("/api/service/contacts");
     QJsonObject body;
     body["nickname"] = nickname;
-    if (!remark.isEmpty()) body["remark"] = remark;
     if (!avatar.isEmpty()) body["avatar"] = avatar;
 
     QNetworkReply *reply = m_nam.post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
@@ -106,11 +117,11 @@ void HttpClient::addContact(const QString &nickname, const QString &remark, cons
         [this](const QString &err) { emit contactError(err); });
 }
 
-void HttpClient::updateContact(const QString &userId, const QString &remark, const QString &avatar)
+void HttpClient::updateContact(const QString &userId, const QString &nickname, const QString &avatar)
 {
     QNetworkRequest req = authedRequest("/api/service/contacts/" + userId);
     QJsonObject body;
-    if (!remark.isEmpty()) body["remark"] = remark;
+    if (!nickname.isEmpty()) body["nickname"] = nickname;
     if (!avatar.isEmpty()) body["avatar"] = avatar;
 
     QNetworkReply *reply = m_nam.put(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
@@ -124,6 +135,62 @@ void HttpClient::updateContact(const QString &userId, const QString &remark, con
 // ── File Upload ─────────────────────────────────────────
 
 void HttpClient::uploadFile(const QString &filePath)
+{
+    QString localPath = filePath;
+    if (localPath.startsWith("file:///"))
+        localPath = QUrl(localPath).toLocalFile();
+
+    QFileInfo fi(localPath);
+    QString origName = fi.fileName();
+    qint64 origSize = fi.size();
+
+    // Check upload cache: same file (path + size + mtime) → reuse URL
+    QString cacheKey = localPath + "|" + QString::number(origSize) + "|" + fi.lastModified().toString(Qt::ISODate);
+    if (m_uploadCache.contains(cacheKey)) {
+        emit uploadSuccess(m_uploadCache.value(cacheKey), origName, origSize);
+        return;
+    }
+
+    QFile *file = new QFile(localPath);
+    if (!file->open(QIODevice::ReadOnly)) {
+        emit uploadFailed("无法打开文件: " + localPath);
+        delete file;
+        return;
+    }
+
+    QHttpMultiPart *multiPart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
+
+    QHttpPart filePart;
+    QMimeDatabase mimeDb;
+    QString mimeType = mimeDb.mimeTypeForFile(fi).name();
+
+    filePart.setHeader(QNetworkRequest::ContentTypeHeader, mimeType);
+    filePart.setHeader(QNetworkRequest::ContentDispositionHeader,
+        QString("form-data; name=\"file\"; filename=\"%1\"").arg(fi.fileName()));
+    filePart.setBodyDevice(file);
+    file->setParent(multiPart);
+    multiPart->append(filePart);
+
+    QNetworkRequest req(QUrl(m_baseUrl + "/api/upload"));
+    QNetworkReply *reply = m_nam.post(req, multiPart);
+    multiPart->setParent(reply);
+
+    handleReply(reply,
+        [this, origName, origSize, cacheKey](const QJsonObject &obj) {
+            QString url = obj["data"].toObject()["url"].toString();
+            if (url.isEmpty())
+                emit uploadFailed("上传返回空URL");
+            else {
+                m_uploadCache.insert(cacheKey, url);
+                emit uploadSuccess(url, origName, origSize);
+            }
+        },
+        [this](const QString &err) { emit uploadFailed(err); });
+}
+
+// ── Settings ─────────────────────────────────────────────
+
+void HttpClient::uploadAvatar(const QString &filePath)
 {
     QString localPath = filePath;
     if (localPath.startsWith("file:///"))
@@ -160,9 +227,25 @@ void HttpClient::uploadFile(const QString &filePath)
             if (url.isEmpty())
                 emit uploadFailed("上传返回空URL");
             else
-                emit uploadSuccess(url);
+                emit avatarUploaded(url);
         },
         [this](const QString &err) { emit uploadFailed(err); });
+}
+
+void HttpClient::saveLoginConfig(const QString &userId, const QString &serverUrl)
+{
+    QSettings settings;
+    settings.setValue("login/userId", userId);
+    settings.setValue("login/serverUrl", serverUrl);
+}
+
+QJsonObject HttpClient::loadLoginConfig()
+{
+    QSettings settings;
+    QJsonObject obj;
+    obj["userId"] = settings.value("login/userId", "").toString();
+    obj["serverUrl"] = settings.value("login/serverUrl", "http://localhost:8080").toString();
+    return obj;
 }
 
 // ── File Download ────────────────────────────────────────

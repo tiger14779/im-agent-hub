@@ -295,6 +295,20 @@ func (h *ChatHub) sendJSON(cc *ChatConn, v interface{}) {
 	}
 }
 
+// NotifyContactsUpdated sends a contacts_updated push to a staff member so their client refreshes.
+func (h *ChatHub) NotifyContactsUpdated(staffID string) {
+	h.mu.RLock()
+	cc, ok := h.clients[staffID]
+	h.mu.RUnlock()
+	if ok {
+		h.sendJSON(cc, map[string]interface{}{
+			"type": "contacts_updated",
+			"data": map[string]interface{}{},
+		})
+		log.Printf("[WS] contacts_updated pushed to %s", staffID)
+	}
+}
+
 // IsOnline returns true if the user has an active WebSocket connection.
 func (h *ChatHub) IsOnline(userID string) bool {
 	h.mu.RLock()

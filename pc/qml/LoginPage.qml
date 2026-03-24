@@ -87,6 +87,7 @@ Page {
                 border.color: serverField.activeFocus ? "#07c160" : "#555"
                 border.width: 1
             }
+            Keys.onReturnPressed: doLogin()
         }
 
         // Login button
@@ -128,6 +129,14 @@ Page {
         }
     }
 
+    Component.onCompleted: {
+        var cfg = HttpClient.loadLoginConfig()
+        if (cfg["userId"] && cfg["userId"].length > 0)
+            userIdField.text = cfg["userId"]
+        if (cfg["serverUrl"] && cfg["serverUrl"].length > 0)
+            serverField.text = cfg["serverUrl"]
+    }
+
     function doLogin() {
         if (userIdField.text.trim().length === 0) return
         loginBtn.loginBusy = true
@@ -147,6 +156,9 @@ Page {
 
             HttpClient.token = token
             HttpClient.serviceUserId = userId
+
+            // Save login config for next launch
+            HttpClient.saveLoginConfig(userId, baseUrl)
 
             // Connect WS to our Go backend (not OpenIM directly)
             WsClient.connectToServer(baseUrl, userId, token)

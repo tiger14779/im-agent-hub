@@ -11,7 +11,7 @@
         :model="form"
         :rules="rules"
         size="large"
-        @keyup.enter="handleLogin"
+        @submit.prevent="handleLogin"
       >
         <el-form-item prop="username">
           <el-input
@@ -70,33 +70,35 @@ const rules: FormRules = {
 
 const handleLogin = async () => {
   if (!formRef.value) return
-  await formRef.value.validate(async (valid) => {
-    if (!valid) return
-    loading.value = true
-    try {
-      const res = await adminLogin(form.username, form.password)
-      const responseData = res?.data
-      const loginData = responseData?.data && typeof responseData.data === 'object'
-        ? responseData.data
-        : responseData
+  try {
+    await formRef.value.validate()
+  } catch {
+    return // validation failed
+  }
+  loading.value = true
+  try {
+    const res = await adminLogin(form.username, form.password)
+    const responseData = res?.data
+    const loginData = responseData?.data && typeof responseData.data === 'object'
+      ? responseData.data
+      : responseData
 
-      const token = loginData?.token
-      const username = loginData?.username
+    const token = loginData?.token
+    const username = loginData?.username
 
-      if (!token || typeof token !== 'string') {
-        ElMessage.error('登录响应异常，请重试')
-        return
-      }
-
-      authStore.setAuth(token, username || form.username)
-      ElMessage.success('登录成功')
-      router.push('/admin/dashboard')
-    } catch {
-      // Error handled by interceptor
-    } finally {
-      loading.value = false
+    if (!token || typeof token !== 'string') {
+      ElMessage.error('登录响应异常，请重试')
+      return
     }
-  })
+
+    authStore.setAuth(token, username || form.username)
+    ElMessage.success('登录成功')
+    await router.replace('/admin/dashboard')
+  } catch {
+    // Error handled by interceptor
+  } finally {
+    loading.value = false
+  }
 }
 </script>
 

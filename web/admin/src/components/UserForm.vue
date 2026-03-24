@@ -9,6 +9,20 @@
       <el-form-item label="用户ID" v-if="!user">
         <el-input :value="previewId" disabled placeholder="系统自动生成" />
       </el-form-item>
+      <el-form-item label="头像">
+        <div style="display: flex; align-items: center; gap: 12px">
+          <el-avatar :size="64" :src="form.avatar || undefined">
+            {{ (form.nickname || '?').charAt(0) }}
+          </el-avatar>
+          <el-upload
+            :show-file-list="false"
+            :http-request="handleAvatarUpload"
+            accept="image/*"
+          >
+            <el-button size="small">上传头像</el-button>
+          </el-upload>
+        </div>
+      </el-form-item>
       <el-form-item label="昵称" prop="nickname">
         <el-input v-model="form.nickname" placeholder="请输入用户昵称" />
       </el-form-item>
@@ -35,10 +49,13 @@
 <script setup lang="ts">
 import { ref, reactive, watch } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import { uploadFile } from '@/services/api'
 
 interface User {
   id: string
   nickname: string
+  avatar?: string
   serviceUserId: string
   serviceName: string
   status: number
@@ -58,13 +75,14 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   close: []
-  submit: [data: { nickname: string; serviceUserId: string }]
+  submit: [data: { nickname: string; serviceUserId: string; avatar?: string }]
 }>()
 
 const formRef = ref<FormInstance>()
 const form = reactive({
   nickname: '',
-  serviceUserId: ''
+  serviceUserId: '',
+  avatar: ''
 })
 
 // Generate a stable preview ID once per dialog open (not recomputed on every render)
@@ -80,19 +98,38 @@ watch(() => props.visible, (val) => {
     if (props.user) {
       form.nickname = props.user.nickname
       form.serviceUserId = props.user.serviceUserId
+      form.avatar = props.user.avatar || ''
     } else {
       form.nickname = ''
       form.serviceUserId = ''
+      form.avatar = ''
       previewId.value = 'user_' + Math.random().toString(36).substring(2, 10)
     }
   }
 })
 
+const handleAvatarUpload = async (options: { file: File }) => {
+  try {
+    const res = await uploadFile(options.file)
+    const url = (res.data as { url: string })?.url || ''
+    if (url) {
+      form.avatar = url
+      ElMessage.success('头像上传成功')
+    }
+  } catch {
+    ElMessage.error('头像上传失败')
+  }
+}
+
 const handleSubmit = async () => {
   if (!formRef.value) return
   await formRef.value.validate((valid) => {
     if (valid) {
-      emit('submit', { nickname: form.nickname, serviceUserId: form.serviceUserId })
+      emit('submit', {
+        nickname: form.nickname,
+        serviceUserId: form.serviceUserId,
+        avatar: form.avatar || undefined
+      })
     }
   })
 }

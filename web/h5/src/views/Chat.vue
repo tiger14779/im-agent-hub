@@ -17,7 +17,7 @@
     <template v-if="state === 'ready'">
       <!-- Header -->
       <header class="chat-header">
-        <button class="back-btn" @click="$router.back()">‹</button>
+        <button class="back-btn" @click="onBackClick">‹</button>
         <span class="title">{{ serviceUserName }}</span>
         <span class="more-btn">···</span>
       </header>
@@ -39,12 +39,27 @@
         @send-voice="onSendVoice"
       />
     </template>
+
+    <!-- Back confirm dialog -->
+    <teleport to="body">
+      <transition name="fade">
+        <div v-if="showBackConfirm" class="back-confirm-mask" @click.self="cancelBack">
+          <div class="back-confirm-dialog">
+            <p class="back-confirm-text">确定要离开当前聊天吗？</p>
+            <div class="back-confirm-btns">
+              <button class="back-confirm-cancel" @click="cancelBack">取消</button>
+              <button class="back-confirm-ok" @click="confirmBack">离开</button>
+            </div>
+          </div>
+        </div>
+      </transition>
+    </teleport>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useChatStore } from '@/stores/chat'
 import { chatWs } from '@/services/ws'
@@ -56,6 +71,7 @@ import ChatInput from '@/components/ChatInput.vue'
 type PageState = 'loading' | 'ready' | 'error'
 
 const route = useRoute()
+const router = useRouter()
 const userStore = useUserStore()
 const chatStore = useChatStore()
 
@@ -64,6 +80,54 @@ const errorMsg = ref('')
 const serviceUserName = ref('客服')
 const loadingMore = ref(false)
 const oldestSeq = ref(0)
+
+/* ---- Back-navigation guard ---- */
+const showBackConfirm = ref(false)
+let backGuardPushed = false
+
+function pushBackGuard() {
+  if (!backGuardPushed) {
+    history.pushState({ chatBackGuard: true }, '')
+    backGuardPushed = true
+  }
+}
+
+function onPopState(_e: PopStateEvent) {
+  // Ignore popstate triggered by DocxPreview closing — just re-push guard
+  if (history.state?.chatBackGuard) {
+    return
+  }
+  // Browser back / swipe-back popped our guard state
+  if (backGuardPushed) {
+    backGuardPushed = false
+    showBackConfirm.value = true
+  }
+}
+
+function onBackClick() {
+  showBackConfirm.value = true
+}
+
+function confirmBack() {
+  showBackConfirm.value = false
+  window.removeEventListener('popstate', onPopState)
+  // If guard state was NOT yet popped (click-triggered), pop it first
+  if (backGuardPushed) {
+    backGuardPushed = false
+    history.back() // pop the guard entry
+    // After a tick, actually navigate back
+    setTimeout(() => router.back(), 0)
+  } else {
+    // Guard was already popped by swipe; just navigate
+    router.back()
+  }
+}
+
+function cancelBack() {
+  showBackConfirm.value = false
+  // Re-push guard if it was consumed by swipe
+  pushBackGuard()
+}
 
 async function init() {
   const targetId = (route.query.id as string | undefined)?.trim()
@@ -121,7 +185,7 @@ async function init() {
         try {
           const parsed = JSON.parse(m.content)
           if (m.contentType === 101) msg.textContent = parsed.text ?? parsed.content ?? m.content
-          else if (m.contentType === 102) msg.pictureContent = { sourcePicture: { url: parsed.url }, snapshotPicture: { url: parsed.url } }
+          else if (m.contentType === 102) { const imgUrl = parsed.url ?? parsed.sourcePicture?.url ?? ''; msg.pictureContent = { sourcePicture: { url: imgUrl }, snapshotPicture: { url: imgUrl } } }
           else if (m.contentType === 103) msg.voiceContent = { sourceUrl: parsed.url, duration: parsed.duration }
           else if (m.contentType === 105) msg.fileContent = { sourceUrl: parsed.url, fileName: parsed.name, fileSize: parsed.size, fileType: parsed.type }
         } catch {
@@ -260,12 +324,66 @@ async function onSendVoice({ blob, duration }: { blob: Blob; duration: number })
   }
 }
 
-onMounted(init)
+onMounted(() => {
+  pushBackGuard()
+  window.addEventListener('popstate', onPopState)
+  init()
+})
 onUnmounted(() => {
+  window.removeEventListener('popstate', onPopState)
   chatWs.disconnect()
 })
 </script>
 
 <style scoped>
 /* All layout styles are in chat.css; only local overrides here */
+
+.back-confirm-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+.back-confirm-dialog {
+  background: #fff;
+  border-radius: 12px;
+  width: 280px;
+  padding: 24px 20px 16px;
+  text-align: center;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
+}
+.back-confirm-text {
+  font-size: 16px;
+  color: #333;
+  margin: 0 0 20px;
+}
+.back-confirm-btns {
+  display: flex;
+  gap: 12px;
+}
+.back-confirm-btns button {
+  flex: 1;
+  height: 40px;
+  border: none;
+  border-radius: 8px;
+  font-size: 15px;
+  cursor: pointer;
+}
+.back-confirm-cancel {
+  background: #f0f0f0;
+  color: #666;
+}
+.back-confirm-ok {
+  background: #07c160;
+  color: #fff;
+}
+.fade-enter-active, .fade-leave-active {
+  transition: opacity 0.2s;
+}
+.fade-enter-from, .fade-leave-to {
+  opacity: 0;
+}
 </style>

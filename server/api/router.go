@@ -23,6 +23,16 @@ func SetupRouter(
 		AllowCredentials: false,
 	}))
 
+	// Prevent Edge / IE from caching API responses (fixes "login then back to login" issue).
+	r.Use(func(c *gin.Context) {
+		if len(c.Request.URL.Path) >= 4 && c.Request.URL.Path[:4] == "/api" {
+			c.Header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+			c.Header("Pragma", "no-cache")
+			c.Header("Expires", "0")
+		}
+		c.Next()
+	})
+
 	chatHub := NewChatHub(msgSvc)
 
 	// Client auth
@@ -49,7 +59,7 @@ func SetupRouter(
 	{
 		svc.GET("/profile", ServiceGetProfile())
 		svc.GET("/contacts", ServiceGetContacts())
-		svc.POST("/contacts", ServiceAddUser(userSvc))
+		svc.POST("/contacts", ServiceAddUser(userSvc, chatHub))
 		svc.PUT("/contacts/:userId", ServiceUpdateContact())
 	}
 
@@ -59,10 +69,10 @@ func SetupRouter(
 		admin.GET("/stats", GetStats(userSvc, chatHub))
 
 		admin.GET("/users", ListUsers(userSvc))
-		admin.POST("/users", CreateUser(userSvc))
-		admin.POST("/users/batch", BatchCreateUsers(userSvc))
-		admin.PUT("/users/:id", UpdateUser(userSvc))
-		admin.DELETE("/users/:id", DeleteUser(userSvc))
+		admin.POST("/users", CreateUser(userSvc, chatHub))
+		admin.POST("/users/batch", BatchCreateUsers(userSvc, chatHub))
+		admin.PUT("/users/:id", UpdateUser(userSvc, chatHub))
+		admin.DELETE("/users/:id", DeleteUser(userSvc, chatHub))
 
 		admin.GET("/services", ListServiceStaff())
 		admin.POST("/services", CreateServiceStaff())

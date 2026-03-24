@@ -203,11 +203,39 @@ Item {
 
                             Rectangle {
                                 width: 40; height: 40; radius: 4
-                                color: fileMouseArea.containsMouse ? "#e0e0e0" : "#f0f0f0"
+                                color: {
+                                    var ext = (fileName || "").toLowerCase()
+                                    if (ext.endsWith(".doc") || ext.endsWith(".docx"))
+                                        return fileMouseArea.containsMouse ? "#1a5bb5" : "#2b6cb0"
+                                    if (ext.endsWith(".xls") || ext.endsWith(".xlsx"))
+                                        return fileMouseArea.containsMouse ? "#1a7a3a" : "#217346"
+                                    if (ext.endsWith(".ppt") || ext.endsWith(".pptx"))
+                                        return fileMouseArea.containsMouse ? "#c43e1c" : "#d04423"
+                                    if (ext.endsWith(".pdf"))
+                                        return fileMouseArea.containsMouse ? "#c12b2b" : "#e2574c"
+                                    return fileMouseArea.containsMouse ? "#e0e0e0" : "#f0f0f0"
+                                }
                                 Label {
                                     anchors.centerIn: parent
-                                    text: "\uD83D\uDCC4"
-                                    font.pixelSize: 22
+                                    text: {
+                                        var ext = (fileName || "").toLowerCase()
+                                        if (ext.endsWith(".doc") || ext.endsWith(".docx")) return "W"
+                                        if (ext.endsWith(".xls") || ext.endsWith(".xlsx")) return "X"
+                                        if (ext.endsWith(".ppt") || ext.endsWith(".pptx")) return "P"
+                                        if (ext.endsWith(".pdf")) return "PDF"
+                                        return "\uD83D\uDCC4"
+                                    }
+                                    color: {
+                                        var ext = (fileName || "").toLowerCase()
+                                        if (ext.endsWith(".doc") || ext.endsWith(".docx") ||
+                                            ext.endsWith(".xls") || ext.endsWith(".xlsx") ||
+                                            ext.endsWith(".ppt") || ext.endsWith(".pptx") ||
+                                            ext.endsWith(".pdf"))
+                                            return "white"
+                                        return "#333"
+                                    }
+                                    font.pixelSize: 18
+                                    font.bold: true
                                 }
                             }
 
