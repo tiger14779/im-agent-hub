@@ -1,12 +1,6 @@
 server:
   port: 8080
-  jwt_secret: "change-this-secret-in-production"
-
-openim:
-  api_url: "http://127.0.0.1:10002"
-  ws_url: "ws://127.0.0.1:10001"
-  admin_user_id: "imAdmin"
-  secret: "openIM123"
+  jwt_secret: "im-agent-hub-jwt-secret-2024"
 
 admin:
   username: "admin"
