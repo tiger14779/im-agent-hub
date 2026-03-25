@@ -221,8 +221,8 @@ func (h *ChatHub) handleSendMessage(cc *ChatConn, data json.RawMessage) {
 		h.sendJSON(receiverConn, map[string]interface{}{
 			"type": "new_message",
 			"data": map[string]interface{}{
-				"serverMsgId":    msg.ServerMsgID,
-				"clientMsgId":    msg.ClientMsgID,
+				"serverMsgID":    msg.ServerMsgID,
+				"clientMsgID":    msg.ClientMsgID,
 				"sendID":         msg.SendID,
 				"recvID":         msg.RecvID,
 				"conversationID": msg.ConversationID,
