@@ -5,19 +5,20 @@ import QtQuick.Dialogs
 import QtMultimedia
 import ImAgentHub
 
+// 消息气泡组件 —— 支持文本/图片/文件/语音多种消息类型的显示
 Item {
     id: bubble
     height: bubbleRow.height + 8
 
-    property bool isSelf: false
-    property int contentType: 101
-    property string textContent: ""
-    property string imageUrl: ""
-    property string fileName: ""
-    property real fileSize: 0
-    property int voiceDuration: 0
-    property int msgStatus: 2   // 1=sending, 2=sent, 3=failed
-    property real sendTime: 0
+    property bool isSelf: false        // 是否为自己发送的消息
+    property int contentType: 101      // 消息类型: 101=文本, 102=图片, 103=语音, 105=文件
+    property string textContent: ""    // 文本内容
+    property string imageUrl: ""       // 图片/文件/语音URL
+    property string fileName: ""       // 文件名
+    property real fileSize: 0          // 文件大小（字节）
+    property int voiceDuration: 0      // 语音时长（秒）
+    property int msgStatus: 2          // 发送状态: 1=发送中, 2=已发送, 3=失败
+    property real sendTime: 0          // 发送时间戳
 
     RowLayout {
         id: bubbleRow
@@ -32,7 +33,7 @@ Item {
         spacing: 8
         layoutDirection: isSelf ? Qt.RightToLeft : Qt.LeftToRight
 
-        // Avatar
+        // 头像
         Rectangle {
             width: 36; height: 36; radius: 4
             color: isSelf ? "#07c160" : "#4a90d9"
@@ -46,7 +47,7 @@ Item {
             }
         }
 
-        // Bubble container
+        // 气泡容器
         ColumnLayout {
             spacing: 2
             Layout.maximumWidth: bubble.width * 0.55
@@ -169,6 +170,7 @@ Item {
                                 ? width / (sourceSize.width / sourceSize.height)
                                 : 120
 
+                        // 加载中指示器
                         BusyIndicator {
                             anchors.centerIn: parent
                             running: parent.status === Image.Loading
@@ -176,7 +178,7 @@ Item {
                             width: 24; height: 24
                         }
 
-                        // Error placeholder
+                        // 加载失败占位图
                         Rectangle {
                             anchors.fill: parent
                             color: "#f0f0f0"
@@ -289,7 +291,7 @@ Item {
                             }
                         }
 
-                        // Animate bars while playing
+                        // 播放时动态音频条动画
                         Timer {
                             id: playTimer
                             interval: 300
@@ -353,7 +355,7 @@ Item {
                 }
             }
 
-            // Time + status
+            // 时间 + 发送状态
             RowLayout {
                 spacing: 4
                 layoutDirection: isSelf ? Qt.RightToLeft : Qt.LeftToRight
@@ -375,12 +377,14 @@ Item {
         }
     }
 
+    // 格式化文件大小（B/KB/MB）
     function formatSize(bytes) {
         if (bytes < 1024) return bytes + " B"
         if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB"
         return (bytes / 1024 / 1024).toFixed(1) + " MB"
     }
 
+    // 格式化消息时间（HH:mm）
     function formatMsgTime(ts) {
         var d = new Date(ts)
         return d.getHours().toString().padStart(2, '0') + ":" +

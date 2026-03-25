@@ -4,16 +4,17 @@ import QtQuick.Layouts
 import QtQuick.Dialogs
 import ImAgentHub
 
+// 聊天主页 —— 包含左侧导航栏、中间联系人列表、右侧聊天区域
 Page {
     id: chatRoot
-    property string staffUserId: ""
-    property string staffNickname: ""
-    property string authToken: ""
-    property string serverUrl: ""
-    property string activeChatId: ""
-    property string activeChatName: ""
+    property string staffUserId: ""     // 当前客服用户ID
+    property string staffNickname: ""   // 当前客服昵称
+    property string authToken: ""       // 认证令牌
+    property string serverUrl: ""       // 服务器地址
+    property string activeChatId: ""    // 当前打开的会话用户ID
+    property string activeChatName: ""  // 当前会话用户昵称
 
-    // Current tab: 0=chats, 1=contacts
+    // 当前 Tab页: 0=聊天列表, 1=通讯录
     property int currentTab: 0
 
     background: Rectangle { color: "#ebebeb" }
@@ -21,13 +22,14 @@ Page {
     ChatModel { id: chatModel }
     ContactModel { id: contactModel }
 
-    // Resolve relative URLs (/api/files/...) to absolute using server base URL
+    // 将相对URL（/api/files/...）拼接为绝对URL
     function resolveUrl(url) {
         if (url && url.length > 0 && url.charAt(0) === '/')
             return HttpClient.baseUrl + url
         return url ?? ""
     }
 
+    // 页面初始化：设置自己的ID、加载联系人、启动桥接服务
     Component.onCompleted: {
         chatModel.setSelfId(staffUserId)
         HttpClient.getContacts()
@@ -38,7 +40,7 @@ Page {
         anchors.fill: parent
         spacing: 0
 
-        // ── Left icon sidebar (WeChat-style) ──────────────
+        // ── 左侧图标导航栏（微信风格）─────────
         Rectangle {
             Layout.preferredWidth: 54
             Layout.fillHeight: true
@@ -49,7 +51,7 @@ Page {
                 anchors.topMargin: 12
                 spacing: 4
 
-                // Staff avatar
+                // 客服头像（取昵称首字母）
                 Rectangle {
                     Layout.alignment: Qt.AlignHCenter
                     width: 36; height: 36; radius: 6
@@ -63,7 +65,7 @@ Page {
 
                 Item { height: 16 }
 
-                // Chat tab icon
+                // 聊天Tab图标
                 Rectangle {
                     Layout.alignment: Qt.AlignHCenter
                     width: 40; height: 40; radius: 6
@@ -73,7 +75,7 @@ Page {
                         text: "\uD83D\uDCAC"   // 💬
                         font.pixelSize: 20
                     }
-                    // Total unread badge
+                    // 总未读角标
                     Rectangle {
                         anchors.right: parent.right
                         anchors.top: parent.top
@@ -99,7 +101,7 @@ Page {
                     }
                 }
 
-                // Contacts tab icon
+                // 通讯录Tab图标
                 Rectangle {
                     Layout.alignment: Qt.AlignHCenter
                     width: 40; height: 40; radius: 6
@@ -120,7 +122,7 @@ Page {
             }
         }
 
-        // ── Middle panel (contact list / conversation list) ─
+        // ── 中间面板（联系人列表 / 会话列表）─────
         Rectangle {
             Layout.preferredWidth: 260
             Layout.fillHeight: true
@@ -130,7 +132,7 @@ Page {
                 anchors.fill: parent
                 spacing: 0
 
-                // Panel header
+                // 面板标题栏
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 50
@@ -147,7 +149,7 @@ Page {
                             Layout.fillWidth: true
                         }
 
-                        // Add contact button (contacts tab only)
+                        // 添加联系人按钮（仅在通讯录Tab显示）
                         RoundButton {
                             visible: currentTab === 1
                             width: 28; height: 28; radius: 14
@@ -162,14 +164,14 @@ Page {
                         }
                     }
 
-                    // Bottom border
+                    // 底部分割线
                     Rectangle {
                         anchors.bottom: parent.bottom
                         width: parent.width; height: 1; color: "#d6d6d6"
                     }
                 }
 
-                // Contact list
+                // 联系人列表组件
                 ContactList {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
@@ -201,7 +203,7 @@ Page {
                 spacing: 0
                 visible: activeChatId.length > 0
 
-                // Chat header
+                // 聊天头部（显示当前会话名称）
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 50
@@ -221,7 +223,7 @@ Page {
                     }
                 }
 
-                // Message list
+                // 消息列表
                 MessageList {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
@@ -229,7 +231,7 @@ Page {
                     selfId: staffUserId
                 }
 
-                // Chat input toolbar + text area
+                // 聊天输入栏（工具条 + 文本输入区）
                 ChatInput {
                     Layout.fillWidth: true
                     onSendText: function(text) {
@@ -244,7 +246,7 @@ Page {
                 }
             }
 
-            // Empty state
+            // 空状态（未选择联系人时显示）
             ColumnLayout {
                 anchors.centerIn: parent
                 visible: activeChatId.length === 0
@@ -264,13 +266,13 @@ Page {
         }
     }
 
-    // ── Dialogs ──────────────────────────────────────────
+    // ── 对话框 ───────────────────────────────────
 
-    property string contextUserId: ""
-    property string pendingAvatarUrl: ""      // for add dialog
-    property string editPendingAvatarUrl: ""  // for edit dialog
+    property string contextUserId: ""         // 右键菜单选中的用户ID
+    property string pendingAvatarUrl: ""      // 添加对话框的待上传头像URL
+    property string editPendingAvatarUrl: ""  // 编辑对话框的待上传头像URL
 
-    // Avatar file picker (shared)
+    // 头像文件选择器（添加/编辑共用）
     FileDialog {
         id: avatarFileDialog
         title: "\u9009\u62E9\u5934\u50CF"
@@ -292,7 +294,7 @@ Page {
         }
     }
 
-    // Add Contact Dialog
+    // ── 添加联系人对话框 ────────────────────
     Dialog {
         id: addContactDialog
         title: "\u6DFB\u52A0\u7528\u6237"
@@ -302,7 +304,7 @@ Page {
         ColumnLayout {
             width: parent.width; spacing: 12
 
-            // Avatar preview + upload button
+            // 头像预览 + 上传按钮
             RowLayout {
                 Layout.alignment: Qt.AlignHCenter
                 spacing: 12
@@ -353,7 +355,7 @@ Page {
         }
     }
 
-    // Edit Contact Dialog
+    // ── 编辑联系人对话框 ────────────────────
     Dialog {
         id: editContactDialog
         title: "\u7F16\u8F91\u8054\u7CFB\u4EBA"
@@ -400,14 +402,14 @@ Page {
                     interval: 1500
                     onTriggered: copiedTip.visible = false
                 }
-                // Hidden helper for clipboard
+                // 隐藏的剪贴板辅助元素
                 TextEdit {
                     id: clipHelper
                     visible: false
                 }
             }
 
-            // Avatar preview + upload button
+            // 头像预览 + 上传按钮
             RowLayout {
                 Layout.alignment: Qt.AlignHCenter
                 spacing: 12
@@ -447,7 +449,7 @@ Page {
                 placeholderText: "\u6635\u79F0"
                 Layout.fillWidth: true
             }
-            // Hidden: keeps the original avatar URL for reference
+            // 隐藏字段：保存原始头像URL供引用
             TextField {
                 id: editAvatarField
                 visible: false
@@ -497,20 +499,23 @@ Page {
         HttpClient.uploadFile(filePath)
     }
 
-    // ── Signal handlers ─────────────────────────────────
+    // ── HttpClient 信号处理 ─────────────────────
 
     Connections {
         target: HttpClient
 
+        // 联系人列表加载完成
         function onContactsLoaded(contacts) {
             contactModel.loadFromJson(contacts)
         }
+        // 新增联系人成功
         function onContactAdded(contact) {
             contactModel.addOrUpdate(
                 contact["userId"], contact["nickname"],
                 contact["avatar"] ?? ""
             )
         }
+        // 更新联系人成功
         function onContactUpdated(contact) {
             var uid = contact["userId"]
             contactModel.updateNickname(uid, contact["nickname"] ?? "")
@@ -519,21 +524,22 @@ Page {
                 activeChatName = contactModel.getNickname(uid)
             }
         }
+        // 文件上传成功回调 —— 根据上下文判断是普通发送还是桥接器发送
         function onUploadSuccess(url, origName, origSize) {
-            console.log("[Upload] SUCCESS url=" + url + " origName=" + origName + " origSize=" + origSize)
-            // Check if this upload was initiated by WxBridge API
+            console.log("[上传] 成功 url=" + url + " origName=" + origName + " origSize=" + origSize)
+            // 检查是否是 WxBridge API 触发的上传
             var bridgeTarget = chatRoot._pendingBridgeTarget
             var bridgeType   = chatRoot._pendingBridgeType
-            console.log("[Upload] bridgeTarget=" + bridgeTarget + " bridgeType=" + bridgeType)
+            console.log("[上传] bridgeTarget=" + bridgeTarget + " bridgeType=" + bridgeType)
             if (bridgeTarget.length > 0) {
                 chatRoot._pendingBridgeTarget = ""
                 chatRoot._pendingBridgeType = ""
 
-                // Respect bridgeType from the API command:
-                //   "image" (Q0011) → always send as image (102)
-                //   "file"  (Q0030) → always send as file (105)
+                // 根据桥接器指定的类型发送：
+                //   "image" (Q0011) → 始终作为图片发送 (contentType=102)
+                //   "file"  (Q0030) → 始终作为文件发送 (contentType=105)
                 if (bridgeType === "image") {
-                    console.log("[Upload] Bridge → IMAGE path (contentType=102)")
+                    console.log("[上传] 桥接器 → 图片发送 (contentType=102)")
                     var bImgContent = JSON.stringify({
                         "sourcePicture": {"url": url, "width": 0, "height": 0, "size": 0, "type": "image/png"},
                         "bigPicture":    {"url": url, "width": 0, "height": 0, "size": 0, "type": "image/png"},
@@ -544,7 +550,7 @@ Page {
                     contactModel.updateLastMessage(bridgeTarget, "[\u56FE\u7247]", Date.now())
                     WxBridge.pushMessageEvent(staffUserId, bridgeTarget, "[\u56FE\u7247]", true, 3)
                 } else {
-                    console.log("[Upload] Bridge → FILE path (contentType=105)")
+                    console.log("[上传] 桥接器 → 文件发送 (contentType=105)")
                     var bFileContent = JSON.stringify({
                         "url": url, "name": origName, "size": origSize
                     })
@@ -557,12 +563,12 @@ Page {
             }
 
             if (activeChatId.length === 0) return
-            // Determine type by extension
+            // 根据文件扩展名判断发送类型
             var lower = origName.toLowerCase()
             if (lower.endsWith(".png") || lower.endsWith(".jpg") ||
                 lower.endsWith(".jpeg") || lower.endsWith(".gif") ||
                 lower.endsWith(".webp") || lower.endsWith(".bmp")) {
-                // Image message
+                // 图片消息
                 var imgContent = JSON.stringify({
                     "sourcePicture": {"url": url, "width": 0, "height": 0, "size": 0, "type": "image/png"},
                     "bigPicture":    {"url": url, "width": 0, "height": 0, "size": 0, "type": "image/png"},
@@ -572,7 +578,7 @@ Page {
                 WsClient.sendMessage(activeChatId, 102, imgContent, imgMsgId)
                 contactModel.updateLastMessage(activeChatId, "[\u56FE\u7247]", Date.now())
             } else {
-                // File message — use H5-compatible format {url, name, size}
+                // 文件消息 —— 使用 H5 兼容格式 {url, name, size}
                 var fileContent = JSON.stringify({
                     "url": url, "name": origName, "size": origSize
                 })
@@ -583,20 +589,23 @@ Page {
         }
     }
 
+    // ── WsClient 信号处理 ─────────────────────
+
     Connections {
         target: WsClient
 
+        // 收到新消息
         function onNewMessage(msg) {
             var sendID = msg["sendID"] ?? ""
             var recvID = msg["recvID"] ?? ""
             var contentType = msg["contentType"] ?? 101
             var contentStr = msg["content"] ?? ""
 
-            // Parse content JSON
+            // 解析消息内容 JSON
             var parsed = {}
             try { parsed = JSON.parse(contentStr) } catch(e) { parsed = {"content": contentStr} }
 
-            // Build a ChatModel-compatible object
+            // 构造 ChatModel 兼容的消息对象
             var chatMsg = {
                 "clientMsgID": msg["clientMsgID"] ?? msg["serverMsgID"] ?? "",
                 "sendID": sendID,
@@ -624,13 +633,13 @@ Page {
                 } : undefined
             }
 
-            // If this message is for the active chat, add to model
+            // 若此消息属于当前打开的会话，添加到消息列表
             var peerID = sendID === staffUserId ? recvID : sendID
             if (peerID === activeChatId) {
                 chatModel.appendMessage(chatMsg)
             }
 
-            // Update contact list
+            // 更新联系人列表的最后消息预览
             var preview = ""
             if (contentType === 101) preview = parsed["text"] ?? parsed["content"] ?? contentStr
             else if (contentType === 102) preview = "[\u56FE\u7247]"
@@ -643,7 +652,7 @@ Page {
                     contactModel.incrementUnread(peerID)
                 }
 
-                // Push to accounting software via WxBridge (port 7888)
+                // 通过 WxBridge 推送消息事件给财务软件（端口 7888）
                 var isSelf = (sendID === staffUserId)
                 var wxType = 1 // text
                 if (contentType === 102) wxType = 3       // image
@@ -654,10 +663,12 @@ Page {
             }
         }
 
+        // 发送消息应答：更新发送状态
         function onMessageAck(clientMsgId, status, serverMsgId, sendTime) {
             chatModel.updateStatus(clientMsgId, status)
         }
 
+        // 历史消息加载完成
         function onHistoryLoaded(peerUserId, messages) {
             if (peerUserId !== activeChatId) return
             chatModel.clear()
@@ -698,56 +709,57 @@ Page {
             }
         }
 
+        // 服务器通知联系人列表变化，重新加载
         function onContactsUpdated() {
             HttpClient.getContacts()
         }
     }
 
-    // ── WxBridge Signal Handlers ─────────────────────────
+    // ── WxBridge 桥接器信号处理 ─────────────────
 
     Connections {
         target: WxBridge
 
-        // Accounting software requests: send text message
+        // 财务软件指令：发送文本消息
         function onApiSendText(wxid, msg) {
-            console.log("[WxBridge] apiSendText to", wxid, ":", msg)
+            console.log("[桥接器] 发送文本到", wxid, ":", msg)
             var content = JSON.stringify({"text": msg})
             var msgId = chatModel.addPendingMessage(wxid, 101, msg)
             WsClient.sendMessage(wxid, 101, content, msgId)
             contactModel.updateLastMessage(wxid, msg, Date.now())
-            // Push self-sent event back to accounting software
+            // 推送自发消息事件回给财务软件
             WxBridge.pushMessageEvent(staffUserId, wxid, msg, true, 1)
         }
 
-        // Accounting software requests: send image
+        // 财务软件指令：发送图片
         function onApiSendImage(wxid, path) {
-            console.log("[WxBridge] apiSendImage to", wxid, ":", path)
-            // Upload the image file first, then send via WS
+            console.log("[桥接器] 发送图片到", wxid, ":", path)
+            // 先上传图片文件，上传成功后通过 WS 发送
             chatRoot._pendingBridgeTarget = wxid
             chatRoot._pendingBridgeType = "image"
             HttpClient.uploadFile(path)
         }
 
-        // Accounting software requests: send file
+        // 财务软件指令：发送文件
         function onApiSendFile(wxid, path) {
-            console.log("[WxBridge] apiSendFile to", wxid, ":", path)
+            console.log("[桥接器] 发送文件到", wxid, ":", path)
             chatRoot._pendingBridgeTarget = wxid
             chatRoot._pendingBridgeType = "file"
             HttpClient.uploadFile(path)
         }
 
-        // Accounting software requests: get friend/contact list
+        // 财务软件指令：获取好友列表
         function onApiGetFriendList() {
-            console.log("[WxBridge] apiGetFriendList")
+            console.log("[桥接器] 获取好友列表")
             WxBridge.pushFriendList(contactModel.toJsonArray())
         }
 
         function onBridgeError(error) {
-            console.warn("[WxBridge] Error:", error)
+            console.warn("[桥接器] 错误:", error)
         }
     }
 
-    // Bridge pending upload state
+    // 桥接器待处理上传状态（记录财务软件触发的上传目标）
     property string _pendingBridgeTarget: ""
     property string _pendingBridgeType: ""
 }

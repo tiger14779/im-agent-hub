@@ -11,13 +11,23 @@
 #include <QHash>
 #include <QtQml/qqmlregistration.h>
 
+/**
+ * @brief HTTP 客户端 —— 负责与后端 REST API 通信
+ *
+ * 功能包括：登录认证、联系人管理、文件上传/下载、登录配置持久化。
+ * 注册为 QML 单例，在 QML 中可直接通过 HttpClient 访问。
+ */
 class HttpClient : public QObject
 {
     Q_OBJECT
     QML_ELEMENT
     QML_SINGLETON
+
+    // 服务器基础地址，例如 http://localhost:8080
     Q_PROPERTY(QString baseUrl READ baseUrl WRITE setBaseUrl NOTIFY baseUrlChanged)
+    // 登录后获取的 JWT token，用于后续接口鉴权
     Q_PROPERTY(QString token READ token WRITE setToken NOTIFY tokenChanged)
+    // 当前客服人员的用户ID
     Q_PROPERTY(QString serviceUserId READ serviceUserId WRITE setServiceUserId NOTIFY serviceUserIdChanged)
 
 public:
@@ -33,69 +43,75 @@ public:
     QString serviceUserId() const { return m_serviceUserId; }
     void setServiceUserId(const QString &id);
 
-    // === Auth ===
-    // Service staff login: POST /api/service/auth/login
+    // === 认证 ===
+    // 客服人员登录: POST /api/service/auth/login
     Q_INVOKABLE void login(const QString &userId);
 
-    // === Contacts ===
-    // GET /api/service/contacts
+    // === 联系人管理 ===
+    // 获取联系人列表: GET /api/service/contacts
     Q_INVOKABLE void getContacts();
-    // POST /api/service/contacts  (add user)
+    // 添加用户（联系人）: POST /api/service/contacts
     Q_INVOKABLE void addContact(const QString &nickname, const QString &avatar);
-    // PUT /api/service/contacts/:userId  (update nickname/avatar)
+    // 更新联系人信息（昵称/头像）: PUT /api/service/contacts/:userId
     Q_INVOKABLE void updateContact(const QString &userId, const QString &nickname, const QString &avatar);
 
-    // === File upload ===
+    // === 文件上传 ===
+    // 上传通用文件（图片/文档等），上传成功后发出 uploadSuccess 信号
     Q_INVOKABLE void uploadFile(const QString &filePath);
+    // 上传头像图片，上传成功后发出 avatarUploaded 信号
     Q_INVOKABLE void uploadAvatar(const QString &filePath);
 
-    // === File download ===
-    // Download and open with system default application
+    // === 文件下载 ===
+    // 下载文件并使用系统默认应用打开
     Q_INVOKABLE void downloadAndOpen(const QString &url, const QString &fileName);
-    // Download to a specific save path
+    // 下载文件到指定保存路径
     Q_INVOKABLE void downloadToPath(const QString &url, const QString &savePath);
 
-    // === Settings ===
+    // === 设置（持久化） ===
+    // 保存登录配置到本地（userId + serverUrl），下次启动自动填充
     Q_INVOKABLE void saveLoginConfig(const QString &userId, const QString &serverUrl);
+    // 读取上次保存的登录配置
     Q_INVOKABLE QJsonObject loadLoginConfig();
 
 signals:
-    void baseUrlChanged();
-    void tokenChanged();
-    void serviceUserIdChanged();
+    void baseUrlChanged();      // 服务器地址变更
+    void tokenChanged();        // 认证令牌变更
+    void serviceUserIdChanged(); // 客服用户ID变更
 
-    // Login
-    void loginSuccess(const QJsonObject &data);
-    void loginFailed(const QString &error);
+    // ── 登录相关信号 ──
+    void loginSuccess(const QJsonObject &data);  // 登录成功，data 包含 token/userId/nickname
+    void loginFailed(const QString &error);      // 登录失败
 
-    // Contacts
-    void contactsLoaded(const QJsonArray &contacts);
-    void contactAdded(const QJsonObject &contact);
-    void contactUpdated(const QJsonObject &contact);
-    void contactError(const QString &error);
+    // ── 联系人相关信号 ──
+    void contactsLoaded(const QJsonArray &contacts); // 联系人列表加载完成
+    void contactAdded(const QJsonObject &contact);   // 新增联系人成功
+    void contactUpdated(const QJsonObject &contact); // 更新联系人成功
+    void contactError(const QString &error);         // 联系人操作失败
 
-    // Upload
-    void uploadSuccess(const QString &url, const QString &fileName, qint64 fileSize);
-    void uploadFailed(const QString &error);
-    void avatarUploaded(const QString &url);
+    // ── 上传相关信号 ──
+    void uploadSuccess(const QString &url, const QString &fileName, qint64 fileSize); // 文件上传成功
+    void uploadFailed(const QString &error);   // 文件上传失败
+    void avatarUploaded(const QString &url);   // 头像上传成功，返回服务器URL
 
-    // Download
-    void downloadFinished(const QString &localPath);
-    void downloadFailed(const QString &error);
+    // ── 下载相关信号 ──
+    void downloadFinished(const QString &localPath); // 下载完成，localPath 为本地路径
+    void downloadFailed(const QString &error);       // 下载失败
 
 private:
+    // 统一处理网络响应：解析 JSON、校验 code、回调 onSuccess/onError
     void handleReply(QNetworkReply *reply,
                      std::function<void(const QJsonObject &)> onSuccess,
                      std::function<void(const QString &)> onError);
+    // 构造带 Token 和 ServiceUserID 的认证请求头
     QNetworkRequest authedRequest(const QString &path) const;
 
-    QNetworkAccessManager m_nam;
-    QString m_baseUrl;
-    QString m_token;
-    QString m_serviceUserId;
-    QTemporaryDir m_tempDir;
+    QNetworkAccessManager m_nam;   // Qt 网络访问管理器
+    QString m_baseUrl;             // 服务器基础地址
+    QString m_token;               // JWT 认证令牌
+    QString m_serviceUserId;       // 当前客服用户ID
+    QTemporaryDir m_tempDir;       // 临时下载目录（应用退出后自动清理）
 
-    // Upload cache: key = "path|size|lastModified" → server URL
+    // 上传缓存: key = "path|size|lastModified" → 服务器URL（避免重复上传同一文件）
     QHash<QString, QString> m_uploadCache;
 };
 

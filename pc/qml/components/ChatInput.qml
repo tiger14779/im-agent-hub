@@ -3,23 +3,24 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Dialogs
 
+// 聊天输入栏组件 —— 包含工具栏（表情/图片/文件）和文本输入区
 Rectangle {
     id: chatInput
     implicitHeight: toolBar.height + inputRow.height + 12
     color: "#f5f5f5"
 
-    signal sendText(string text)
-    signal sendFile(string filePath)
-    signal sendImage(string filePath)
+    signal sendText(string text)       // 发送文本消息
+    signal sendFile(string filePath)   // 发送文件
+    signal sendImage(string filePath)  // 发送图片
 
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
 
-        // Top border
+        // 顶部分割线
         Rectangle { Layout.fillWidth: true; height: 1; color: "#ddd" }
 
-        // Toolbar
+        // 工具栏
         RowLayout {
             id: toolBar
             Layout.fillWidth: true
@@ -28,21 +29,7 @@ Rectangle {
             Layout.topMargin: 4
             spacing: 2
 
-            // Emoji placeholder
-            ToolButton {
-                width: 28; height: 28
-                contentItem: Label {
-                    text: "\uD83D\uDE00"   // 😀
-                    font.pixelSize: 18
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-                ToolTip.text: "\u8868\u60C5"
-                ToolTip.visible: hovered
-                onClicked: {} // TODO: emoji picker
-            }
-
-            // Send image
+            // 发送图片按钮
             ToolButton {
                 width: 28; height: 28
                 contentItem: Label {
@@ -56,7 +43,7 @@ Rectangle {
                 onClicked: imageDialog.open()
             }
 
-            // Send file
+            // 发送文件按钮
             ToolButton {
                 width: 28; height: 28
                 contentItem: Label {
@@ -73,7 +60,7 @@ Rectangle {
             Item { Layout.fillWidth: true }
         }
 
-        // Text input + send button
+        // 文本输入区 + 发送按钮
         RowLayout {
             id: inputRow
             Layout.fillWidth: true
@@ -101,10 +88,10 @@ Rectangle {
                     Keys.onPressed: function(event) {
                         if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                             if (event.modifiers & Qt.ShiftModifier) {
-                                // Shift+Enter: insert newline
+                                // Shift+Enter: 插入换行
                                 event.accepted = false
                             } else {
-                                // Enter: send
+                                // Enter: 发送消息
                                 event.accepted = true
                                 doSend()
                             }

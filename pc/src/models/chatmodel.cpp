@@ -79,7 +79,7 @@ QString ChatModel::addPendingMessage(const QString &recvId, int contentType,
     msg.fileName = fileName;
     msg.fileSize = fileSize;
     msg.sendTime = QDateTime::currentMSecsSinceEpoch();
-    msg.status = 1; // sending
+    msg.status = 1; // 发送中
 
     beginInsertRows(QModelIndex(), m_messages.size(), m_messages.size());
     m_messages.append(msg);
@@ -118,9 +118,9 @@ ChatMessage ChatModel::fromJson(const QJsonObject &obj) const
     m.sendTime = static_cast<qint64>(obj["sendTime"].toDouble());
     m.status = obj["status"].toInt(2);
 
-    // Parse content based on type
+    // 根据消息类型解析对应的内容字段
     if (m.contentType == 101) {
-        // Text message
+        // 文本消息：优先从 textElem.text 取，其次 textElem.content，最后 fallback 到 content
         QJsonObject textElem = obj["textElem"].toObject();
         m.textContent = textElem["text"].toString();
         if (m.textContent.isEmpty())
@@ -128,7 +128,7 @@ ChatMessage ChatModel::fromJson(const QJsonObject &obj) const
         if (m.textContent.isEmpty())
             m.textContent = obj["content"].toString();
     } else if (m.contentType == 102) {
-        // Image message — support both OpenIM format and simple {url} format
+        // 图片消息 —— 同时支持 OpenIM 格式和简化 {url} 格式
         QJsonObject pic = obj["pictureElem"].toObject();
         QJsonObject src = pic["sourcePicture"].toObject();
         m.imageUrl = src["url"].toString();
@@ -137,7 +137,7 @@ ChatMessage ChatModel::fromJson(const QJsonObject &obj) const
         if (m.imageUrl.isEmpty())
             m.imageUrl = pic["url"].toString();
     } else if (m.contentType == 105) {
-        // File message — support both OpenIM format and simple {url,name,size} format
+        // 文件消息 —— 同时支持 OpenIM 格式和简化 {url,name,size} 格式
         QJsonObject fileElem = obj["fileElem"].toObject();
         m.fileName = fileElem["fileName"].toString();
         if (m.fileName.isEmpty())
@@ -149,7 +149,7 @@ ChatMessage ChatModel::fromJson(const QJsonObject &obj) const
         if (m.imageUrl.isEmpty())
             m.imageUrl = fileElem["url"].toString();
     } else if (m.contentType == 103) {
-        // Voice message — supports {url, duration} format
+        // 语音消息 —— 支持 {url, duration} 格式
         QJsonObject voiceElem = obj["voiceElem"].toObject();
         m.imageUrl = voiceElem["sourceUrl"].toString();
         if (m.imageUrl.isEmpty())

@@ -8,11 +8,13 @@
 WsClient::WsClient(QObject *parent)
     : QObject(parent)
 {
+    // 绑定 WebSocket 信号到对应槽函数
     connect(&m_ws, &QWebSocket::connected, this, &WsClient::onConnected);
     connect(&m_ws, &QWebSocket::disconnected, this, &WsClient::onDisconnected);
     connect(&m_ws, &QWebSocket::textMessageReceived, this, &WsClient::onTextMessageReceived);
     connect(&m_ws, &QWebSocket::errorOccurred, this, &WsClient::onError);
 
+    // 断线后3秒尝试重连
     m_reconnectTimer.setInterval(3000);
     m_reconnectTimer.setSingleShot(true);
     connect(&m_reconnectTimer, &QTimer::timeout, this, &WsClient::tryReconnect);
@@ -22,8 +24,8 @@ WsClient::~WsClient()
 {
     m_reconnectTimer.stop();
     m_reconnectTimer.disconnect();
-    m_baseUrl.clear();            // prevent reconnect in onDisconnected
-    m_ws.disconnect();            // detach all signals
+    m_baseUrl.clear();            // 阻止 onDisconnected 中触发重连
+    m_ws.disconnect();            // 断开所有信号连接
     if (m_ws.state() != QAbstractSocket::UnconnectedState)
         m_ws.close();
 }
@@ -35,7 +37,7 @@ void WsClient::connectToServer(const QString &baseUrl, const QString &staffId, c
     m_token = token;
     m_reconnectAttempts = 0;
 
-    // Build WS URL:  ws(s)://<host>/api/service/ws?staffId=xxx&token=xxx
+    // 构造 WebSocket 地址:  ws(s)://<host>/api/service/ws?staffId=xxx&token=xxx
     QString wsBase = baseUrl;
     wsBase.replace(QStringLiteral("http://"), QStringLiteral("ws://"));
     wsBase.replace(QStringLiteral("https://"), QStringLiteral("wss://"));
@@ -64,7 +66,7 @@ void WsClient::sendMessage(const QString &recvId, int contentType,
     data["contentType"] = contentType;
     data["clientMsgId"] = clientMsgId;
 
-    // Parse content string as JSON object so it embeds properly (not double-escaped)
+    // 将 content 字符串解析为 JSON 对象，避免双重转义
     QJsonDocument contentDoc = QJsonDocument::fromJson(content.toUtf8());
     if (contentDoc.isObject())
         data["content"] = contentDoc.object();
@@ -101,6 +103,7 @@ void WsClient::onDisconnected()
 {
     m_connected = false;
     emit connectedChanged();
+    // 若 m_baseUrl 非空，说明非主动断开，启动重连定时器
     if (!m_baseUrl.isEmpty())
 
     m_reconnectTimer.start();
@@ -121,6 +124,7 @@ void WsClient::onError(QAbstractSocket::SocketError error)
 
 void WsClient::tryReconnect()
 {
+    // 最多尝试10次重连，超过则放弃
     if (m_reconnectAttempts >= 10 || m_baseUrl.isEmpty()) return;
     m_reconnectAttempts++;
     connectToServer(m_baseUrl, m_staffId, m_token);

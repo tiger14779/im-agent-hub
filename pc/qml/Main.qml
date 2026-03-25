@@ -13,16 +13,17 @@ ApplicationWindow {
     title: "IM Agent Hub - \u5BA2\u670D\u7AEF"
     color: "#ebebeb"
 
+    // 窗口关闭时停止桥接服务和 WebSocket 连接
     onClosing: function(close) {
         WxBridge.stopServer()
         WsClient.disconnect()
     }
 
-    // ── Global state ───────────────────────────────────
-    property string staffUserId: ""
-    property string staffNickname: ""
-    property string authToken: ""
-    property string serverUrl: ""
+    // ── 全局状态（登录后填充）─────────────────
+    property string staffUserId: ""    // 当前客服用户ID
+    property string staffNickname: ""  // 当前客服昵称
+    property string authToken: ""      // JWT 认证令牌
+    property string serverUrl: ""      // 服务器地址
 
     StackView {
         id: stackView

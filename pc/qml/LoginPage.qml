@@ -3,8 +3,10 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import ImAgentHub
 
+// 登录页 —— 输入客服ID和服务器地址进行登录
 Page {
     id: loginRoot
+    // 登录成功后发出信号，携带 userId/nickname/token/baseUrl
     signal loginDone(string userId, string nickname, string token, string baseUrl)
 
     background: Rectangle {
@@ -19,7 +21,7 @@ Page {
         spacing: 20
         width: 340
 
-        // Logo / Title
+        // Logo / 标题区域
         Rectangle {
             Layout.alignment: Qt.AlignHCenter
             width: 72; height: 72
@@ -51,7 +53,7 @@ Page {
 
         Item { height: 8 }
 
-        // Staff User ID
+        // 客服ID输入框
         TextField {
             id: userIdField
             placeholderText: "\u8BF7\u8F93\u5165\u5BA2\u670DID"  // 请输入客服ID
@@ -70,7 +72,7 @@ Page {
             Keys.onReturnPressed: doLogin()
         }
 
-        // Server URL
+        // 服务器地址输入框
         TextField {
             id: serverField
             text: "http://localhost:8080"
@@ -90,7 +92,7 @@ Page {
             Keys.onReturnPressed: doLogin()
         }
 
-        // Login button
+        // 登录按钮
         Button {
             id: loginBtn
             text: loginBusy ? "\u767B\u5F55\u4E2D..." : "\u767B \u5F55"
@@ -116,7 +118,7 @@ Page {
             onClicked: doLogin()
         }
 
-        // Error label
+        // 错误提示标签
         Label {
             id: errorLabel
             color: "#e74c3c"
@@ -129,6 +131,7 @@ Page {
         }
     }
 
+    // 页面初始化时，从本地配置恢复上次的登录信息
     Component.onCompleted: {
         var cfg = HttpClient.loadLoginConfig()
         if (cfg["userId"] && cfg["userId"].length > 0)
@@ -137,6 +140,7 @@ Page {
             serverField.text = cfg["serverUrl"]
     }
 
+    // 登录逻辑
     function doLogin() {
         if (userIdField.text.trim().length === 0) return
         loginBtn.loginBusy = true
@@ -145,6 +149,7 @@ Page {
         HttpClient.login(userIdField.text.trim())
     }
 
+    // 监听 HttpClient 的登录回调
     Connections {
         target: HttpClient
         function onLoginSuccess(data) {
@@ -157,10 +162,10 @@ Page {
             HttpClient.token = token
             HttpClient.serviceUserId = userId
 
-            // Save login config for next launch
+            // 保存登录配置，下次启动自动填充
             HttpClient.saveLoginConfig(userId, baseUrl)
 
-            // Connect WS to our Go backend (not OpenIM directly)
+            // 连接 WebSocket 到 Go 后端（而非直接连 OpenIM）
             WsClient.connectToServer(baseUrl, userId, token)
 
             loginRoot.loginDone(userId, nickname, token, baseUrl)

@@ -3,11 +3,10 @@
   "version": "1.0.0",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc && vite build",
+    "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
-    "@openim/wasm-client-sdk": "^3.5.1",
     "axios": "^1.6.0",
     "docx-preview": "^0.3.7",
     "pinia": "^2.1.7",

@@ -6,30 +6,41 @@
 #include <QJsonArray>
 #include <QtQml/qqmlregistration.h>
 
+/**
+ * @brief 联系人结构体
+ *
+ * 存储单个联系人的信息，包括最后一条消息和未读数量。
+ */
 struct Contact {
-    QString userId;
-    QString nickname;
-    QString avatarUrl;
-    QString lastMessage;
-    qint64 lastTime = 0;
-    int unreadCount = 0;
+    QString userId;       // 用户ID
+    QString nickname;     // 昵称
+    QString avatarUrl;    // 头像URL
+    QString lastMessage;  // 最后一条消息预览
+    qint64 lastTime = 0;  // 最后消息时间戳
+    int unreadCount = 0;  // 未读消息数
 };
 
+/**
+ * @brief 联系人列表模型 —— 为 QML ListView 提供联系人数据
+ *
+ * 支持功能：从服务器加载、增删改查、未读计数、导出为 JSON 数组。
+ */
 class ContactModel : public QAbstractListModel
 {
     Q_OBJECT
     QML_ELEMENT
-    Q_PROPERTY(int count READ count NOTIFY countChanged)
-    Q_PROPERTY(int totalUnread READ totalUnread NOTIFY totalUnreadChanged)
+    Q_PROPERTY(int count READ count NOTIFY countChanged)         // 联系人数量
+    Q_PROPERTY(int totalUnread READ totalUnread NOTIFY totalUnreadChanged)  // 总未读数
 
 public:
+    // QML 可访问的角色枚举
     enum Roles {
-        UserIdRole = Qt::UserRole + 1,
-        NicknameRole,
-        AvatarUrlRole,
-        LastMessageRole,
-        LastTimeRole,
-        UnreadCountRole
+        UserIdRole = Qt::UserRole + 1,   // 用户ID
+        NicknameRole,                    // 昵称
+        AvatarUrlRole,                   // 头像URL
+        LastMessageRole,                 // 最后一条消息
+        LastTimeRole,                    // 最后消息时间
+        UnreadCountRole                  // 未读数
     };
 
     explicit ContactModel(QObject *parent = nullptr);
@@ -41,20 +52,30 @@ public:
     int count() const { return m_contacts.size(); }
     int totalUnread() const;
 
-    // Load contacts from server JSON array
+    // 从服务器返回的 JSON 数组加载联系人列表（会清空现有数据）
     Q_INVOKABLE void loadFromJson(const QJsonArray &arr);
 
+    // 添加或更新联系人（已存在则更新昵称和头像）
     Q_INVOKABLE void addOrUpdate(const QString &userId, const QString &nickname,
                                   const QString &avatarUrl = {});
+    // 更新联系人昵称
     Q_INVOKABLE void updateNickname(const QString &userId, const QString &nickname);
+    // 更新联系人头像
     Q_INVOKABLE void updateAvatar(const QString &userId, const QString &avatarUrl);
+    // 更新最后一条消息预览和时间
     Q_INVOKABLE void updateLastMessage(const QString &userId, const QString &text, qint64 time);
+    // 增加未读计数
     Q_INVOKABLE void incrementUnread(const QString &userId);
+    // 清除未读计数（切换到该会话时调用）
     Q_INVOKABLE void clearUnread(const QString &userId);
+    // 清空所有联系人
     Q_INVOKABLE void clear();
 
+    // 获取指定用户的昵称，找不到则返回 userId
     Q_INVOKABLE QString getNickname(const QString &userId) const;
+    // 获取指定用户的头像URL
     Q_INVOKABLE QString getAvatar(const QString &userId) const;
+    // 导出联系人列表为 JSON 数组（用于推送给财务软件）
     Q_INVOKABLE QJsonArray toJsonArray() const;
 
 signals:
@@ -62,8 +83,9 @@ signals:
     void totalUnreadChanged();
 
 private:
+    // 根据 userId 查找联系人在列表中的索引，未找到返回 -1
     int findByUserId(const QString &userId) const;
-    QVector<Contact> m_contacts;
+    QVector<Contact> m_contacts;  // 联系人列表
 };
 
 #endif // CONTACTMODEL_H

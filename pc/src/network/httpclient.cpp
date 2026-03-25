@@ -19,12 +19,11 @@ HttpClient::HttpClient(QObject *parent)
 
 HttpClient::~HttpClient()
 {
-    // Abort all pending network replies to prevent [this] lambda callbacks
-    // from firing after destruction
+    // 销毁前中止所有未完成的网络请求，防止析构后 lambda 回调导致崩溃
     const auto replies = findChildren<QNetworkReply*>();
     for (QNetworkReply *reply : replies) {
-        reply->disconnect();   // detach finished signal
-        reply->abort();
+        reply->disconnect();   // 断开 finished 信号
+        reply->abort();        // 强制中止请求
         reply->deleteLater();
     }
 }
@@ -53,6 +52,10 @@ void HttpClient::setServiceUserId(const QString &id)
     }
 }
 
+/**
+ * @brief 构造带认证头的网络请求
+ * 自动附加 Authorization 和 X-Service-UserID 请求头
+ */
 QNetworkRequest HttpClient::authedRequest(const QString &path) const
 {
     QNetworkRequest req(QUrl(m_baseUrl + path));
@@ -64,7 +67,7 @@ QNetworkRequest HttpClient::authedRequest(const QString &path) const
     return req;
 }
 
-// ── Auth ────────────────────────────────────────────────
+// ── 认证 ────────────────────────────────────────────────
 
 void HttpClient::login(const QString &userId)
 {
@@ -88,7 +91,7 @@ void HttpClient::login(const QString &userId)
         [this](const QString &err) { emit loginFailed(err); });
 }
 
-// ── Contacts ────────────────────────────────────────────
+// ── 联系人管理 ──────────────────────────────────────────
 
 void HttpClient::getContacts()
 {
@@ -132,10 +135,11 @@ void HttpClient::updateContact(const QString &userId, const QString &nickname, c
         [this](const QString &err) { emit contactError(err); });
 }
 
-// ── File Upload ─────────────────────────────────────────
+// ── 文件上传 ─────────────────────────────────────────────
 
 void HttpClient::uploadFile(const QString &filePath)
 {
+    // 兼容 QML 传入的 file:/// 前缀路径
     QString localPath = filePath;
     if (localPath.startsWith("file:///"))
         localPath = QUrl(localPath).toLocalFile();
@@ -144,7 +148,7 @@ void HttpClient::uploadFile(const QString &filePath)
     QString origName = fi.fileName();
     qint64 origSize = fi.size();
 
-    // Check upload cache: same file (path + size + mtime) → reuse URL
+    // 检查上传缓存：相同文件（路径+大小+修改时间）直接复用已上传的URL
     QString cacheKey = localPath + "|" + QString::number(origSize) + "|" + fi.lastModified().toString(Qt::ISODate);
     if (m_uploadCache.contains(cacheKey)) {
         emit uploadSuccess(m_uploadCache.value(cacheKey), origName, origSize);
@@ -188,7 +192,7 @@ void HttpClient::uploadFile(const QString &filePath)
         [this](const QString &err) { emit uploadFailed(err); });
 }
 
-// ── Settings ─────────────────────────────────────────────
+// ── 头像上传 ─────────────────────────────────────────────
 
 void HttpClient::uploadAvatar(const QString &filePath)
 {
@@ -232,6 +236,8 @@ void HttpClient::uploadAvatar(const QString &filePath)
         [this](const QString &err) { emit uploadFailed(err); });
 }
 
+// ── 登录配置持久化 ───────────────────────────────────
+
 void HttpClient::saveLoginConfig(const QString &userId, const QString &serverUrl)
 {
     QSettings settings;
@@ -248,7 +254,7 @@ QJsonObject HttpClient::loadLoginConfig()
     return obj;
 }
 
-// ── File Download ────────────────────────────────────────
+// ── 文件下载 ─────────────────────────────────────────────
 
 void HttpClient::downloadAndOpen(const QString &url, const QString &fileName)
 {
@@ -257,12 +263,12 @@ void HttpClient::downloadAndOpen(const QString &url, const QString &fileName)
         return;
     }
 
-    // Resolve relative URL
+    // 将相对URL拼接为完整地址
     QString fullUrl = url;
     if (url.startsWith('/'))
         fullUrl = m_baseUrl + url;
 
-    // Save to temp directory with original file name
+    // 保存到临时目录，使用原始文件名
     QString savePath = m_tempDir.filePath(fileName.isEmpty() ? "download" : fileName);
 
     QNetworkRequest req{QUrl{fullUrl}};
@@ -282,7 +288,7 @@ void HttpClient::downloadAndOpen(const QString &url, const QString &fileName)
         file.write(reply->readAll());
         file.close();
 
-        // Open with system default application
+        // 使用系统默认应用打开已下载的文件
         QDesktopServices::openUrl(QUrl::fromLocalFile(savePath));
         emit downloadFinished(savePath);
     });
@@ -295,12 +301,12 @@ void HttpClient::downloadToPath(const QString &url, const QString &savePath)
         return;
     }
 
-    // Resolve relative URL
+    // 将相对URL拼接为完整地址
     QString fullUrl = url;
     if (url.startsWith('/'))
         fullUrl = m_baseUrl + url;
 
-    // Ensure target directory exists
+    // 确保目标保存目录存在
     QFileInfo fi(savePath);
     QDir().mkpath(fi.absolutePath());
 
@@ -325,7 +331,7 @@ void HttpClient::downloadToPath(const QString &url, const QString &savePath)
     });
 }
 
-// ── Internal ────────────────────────────────────────────
+// ── 内部工具方法 ────────────────────────────────────────
 
 void HttpClient::handleReply(QNetworkReply *reply,
     std::function<void(const QJsonObject &)> onSuccess,

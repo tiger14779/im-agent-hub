@@ -20,7 +20,7 @@ WxBridge::~WxBridge()
     stopServer();
 }
 
-// ── HTTP API Server on port 8888 ────────────────────────
+// ── HTTP API 服务（端口 8888）────────────────────────────────
 
 bool WxBridge::startServer()
 {
@@ -50,11 +50,11 @@ void WxBridge::stopServer()
 {
     if (m_server) {
         m_server->close();
-        // Close all active sockets immediately (don't rely on deleteLater)
+        // 立即关闭所有活跃的 Socket 连接（不依赖 deleteLater）
         for (auto it = m_buffers.begin(); it != m_buffers.end(); ++it) {
             QTcpSocket *sock = it.key();
-            sock->disconnect();        // detach all signals
-            sock->abort();             // force-close immediately
+            sock->disconnect();        // 断开所有信号
+            sock->abort();             // 强制关闭连接
             delete sock;
         }
         m_buffers.clear();
@@ -104,7 +104,7 @@ void WxBridge::onNewConnection()
     }
 }
 
-// ── Handle incoming API commands from accounting software ──
+// ── 处理财务软件下发的 API 指令 ───────────────────
 
 void WxBridge::handleApiRequest(const QString &body, QTcpSocket *socket)
 {
@@ -134,7 +134,7 @@ void WxBridge::handleApiRequest(const QString &body, QTcpSocket *socket)
     qDebug() << "[WxBridge] Command type:" << type;
 
     if (type == "Q0001") {
-        // Send text message
+        // 发送文本消息
         QString wxid = data["wxid"].toString();
         QString msg  = data["msg"].toString();
         if (!wxid.isEmpty() && !msg.isEmpty()) {
@@ -145,7 +145,7 @@ void WxBridge::handleApiRequest(const QString &body, QTcpSocket *socket)
         }
 
     } else if (type == "Q0011") {
-        // Send image
+        // 发送图片
         QString wxid = data["wxid"].toString();
         QString path = data["path"].toString();
         if (!wxid.isEmpty() && !path.isEmpty()) {
@@ -156,7 +156,7 @@ void WxBridge::handleApiRequest(const QString &body, QTcpSocket *socket)
         }
 
     } else if (type == "Q0030") {
-        // Send file
+        // 发送文件
         QString wxid = data["wxid"].toString();
         QString path = data["path"].toString();
         if (!wxid.isEmpty() && !path.isEmpty()) {
@@ -167,7 +167,7 @@ void WxBridge::handleApiRequest(const QString &body, QTcpSocket *socket)
         }
 
     } else if (type == "Q0005") {
-        // Get friend list — emit signal, QML will respond
+        // 获取好友列表 —— 发出信号，由 QML 层响应
         emit apiGetFriendList();
         sendResponse({{"status", "ok"}, {"type", type}});
 
@@ -176,7 +176,7 @@ void WxBridge::handleApiRequest(const QString &body, QTcpSocket *socket)
     }
 }
 
-// ── Push message events to accounting software on port 7888 ──
+// ── 推送消息事件到财务软件（端口 7888）───────────
 
 void WxBridge::pushMessageEvent(const QString &fromId, const QString &toId,
                                  const QString &msg, bool isSelf, int wxType)
@@ -184,8 +184,8 @@ void WxBridge::pushMessageEvent(const QString &fromId, const QString &toId,
     qint64 now = QDateTime::currentSecsSinceEpoch();
 
     QJsonObject data;
-    data["fromType"]     = 1;  // 1 = private chat
-    data["msgSource"]    = isSelf ? 1 : 0;  // 0=received, 1=self-sent
+    data["fromType"]     = 1;  // 1 = 私聊
+    data["msgSource"]    = isSelf ? 1 : 0;  // 0=接收, 1=自发
     data["fromWxid"]     = fromId;
     data["toWxid"]       = toId;
     data["msg"]          = msg;
