@@ -206,6 +206,7 @@ async function init() {
       if (parsed.length > 0) {
         oldestSeq.value = Math.min(...parsed.map(m => (m as unknown as { seq: number }).seq || 0))
       }
+      loadingMore.value = false
     }
 
     // 3. Connect WebSocket
@@ -242,8 +243,6 @@ function onLoadMore() {
   loadingMore.value = true
   const serviceId = userStore.serviceUserId || (route.query.id as string)
   chatWs.loadHistory(serviceId, oldestSeq.value, 50)
-  // The onHistory callback will handle the result
-  setTimeout(() => { loadingMore.value = false }, 1000)
 }
 
 function onSendText(text: string) {

@@ -2,6 +2,8 @@
 
 #include <QUuid>
 #include <QJsonDocument>
+#include <QJsonArray>
+#include <QSet>
 
 ChatModel::ChatModel(QObject *parent)
     : QAbstractListModel(parent)
@@ -61,6 +63,27 @@ void ChatModel::appendMessage(const QJsonObject &msg)
     ChatMessage m = fromJson(msg);
     beginInsertRows(QModelIndex(), m_messages.size(), m_messages.size());
     m_messages.append(m);
+    endInsertRows();
+    emit countChanged();
+}
+
+void ChatModel::prependMessages(const QJsonArray &msgs)
+{
+    if (msgs.isEmpty()) return;
+    // Build list, filtering duplicates
+    QVector<ChatMessage> newMsgs;
+    QSet<QString> existing;
+    for (const auto &m : m_messages)
+        existing.insert(m.clientMsgID);
+    for (const auto &val : msgs) {
+        ChatMessage cm = fromJson(val.toObject());
+        if (!existing.contains(cm.clientMsgID))
+            newMsgs.append(cm);
+    }
+    if (newMsgs.isEmpty()) return;
+    beginInsertRows(QModelIndex(), 0, newMsgs.size() - 1);
+    for (int i = newMsgs.size() - 1; i >= 0; --i)
+        m_messages.prepend(newMsgs[i]);
     endInsertRows();
     emit countChanged();
 }

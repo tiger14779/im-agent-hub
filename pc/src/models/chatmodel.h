@@ -3,6 +3,7 @@
 
 #include <QAbstractListModel>
 #include <QJsonObject>
+#include <QJsonArray>
 #include <QDateTime>
 #include <QtQml/qqmlregistration.h>
 
@@ -65,6 +66,9 @@ public:
 
     // 添加一条服务器返回的消息
     Q_INVOKABLE void appendMessage(const QJsonObject &msg);
+
+    // 批量插入历史消息到列表头部（加载更多旧消息）
+    Q_INVOKABLE void prependMessages(const QJsonArray &msgs);
 
     // 添加本地临时消息（乐观发送：先显示“发送中”，服务器确认后更新状态）
     Q_INVOKABLE QString addPendingMessage(const QString &recvId, int contentType,

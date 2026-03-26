@@ -14,6 +14,11 @@ Page {
     property string activeChatId: ""    // 当前打开的会话用户ID
     property string activeChatName: ""  // 当前会话用户昵称
 
+    // 分页状态
+    property real oldestSeq: 0          // 当前最旧消息的 seq（用于向上加载更多）
+    property bool hasMoreHistory: true  // 是否还有更多历史消息
+    property bool loadingMore: false    // 是否正在加载更多
+
     // 当前 Tab页: 0=聊天列表, 1=通讯录
     property int currentTab: 0
 
@@ -290,6 +295,9 @@ Page {
                     Layout.fillHeight: true
                     model: chatModel
                     selfId: staffUserId
+                    loadingMore: chatRoot.loadingMore
+                    hasMore: chatRoot.hasMoreHistory
+                    onRequestLoadMore: chatRoot.loadMoreHistory()
                 }
 
                 // 聊天输入栏（工具条 + 文本输入区）
@@ -537,6 +545,9 @@ Page {
         activeChatName = contactModel.getNickname(userId)
         chatModel.clear()
         contactModel.clearUnread(userId)
+        oldestSeq = 0
+        hasMoreHistory = true
+        loadingMore = false
         // Load history from OpenIM via our backend WS
         WsClient.loadHistory(userId)
     }
@@ -548,6 +559,13 @@ Page {
         contactModel.updateLastMessage(activeChatId, text, Date.now())
         // Push self-sent event to accounting software
         WxBridge.pushMessageEvent(staffUserId, activeChatId, text, true, 1)
+    }
+
+    // 加载更多历史消息（向上滚动触发）
+    function loadMoreHistory() {
+        if (loadingMore || !hasMoreHistory || !activeChatId) return
+        loadingMore = true
+        WsClient.loadHistory(activeChatId, oldestSeq, 50)
     }
 
     function sendImageMessage(filePath) {
@@ -730,15 +748,18 @@ Page {
         }
 
         // 历史消息加载完成
-        function onHistoryLoaded(peerUserId, messages) {
+        function onHistoryLoaded(peerUserId, messages, hasMore) {
             if (peerUserId !== activeChatId) return
-            chatModel.clear()
+            hasMoreHistory = hasMore
+
+            // 将服务器消息转换为 chatModel 可用的 JSON 对象数组
+            var parsed = []
             for (var i = 0; i < messages.length; i++) {
                 var m = messages[i]
                 var ct = m["contentType"] ?? 101
                 var contentStr = m["content"] ?? ""
-                var parsed = {}
-                try { parsed = JSON.parse(contentStr) } catch(e) { parsed = {"content": contentStr} }
+                var p = {}
+                try { p = JSON.parse(contentStr) } catch(e) { p = {"content": contentStr} }
 
                 var obj = {
                     "clientMsgID": m["clientMsgID"] ?? m["serverMsgID"] ?? "",
@@ -747,26 +768,42 @@ Page {
                     "contentType": ct,
                     "sendTime": m["sendTime"] ?? 0,
                     "status": 2,
-                    "textElem": ct === 101 ? parsed : undefined,
-                    "content": ct === 101 ? (parsed["text"] ?? parsed["content"] ?? contentStr) : undefined,
+                    "textElem": ct === 101 ? p : undefined,
+                    "content": ct === 101 ? (p["text"] ?? p["content"] ?? contentStr) : undefined,
                     "pictureElem": ct === 102 ? (function() {
-                        var sp = parsed["sourcePicture"] ?? {"url": parsed["url"] ?? ""}
-                        var bp = parsed["bigPicture"] ?? {"url": parsed["url"] ?? ""}
+                        var sp = p["sourcePicture"] ?? {"url": p["url"] ?? ""}
+                        var bp = p["bigPicture"] ?? {"url": p["url"] ?? ""}
                         sp["url"] = resolveUrl(sp["url"] ?? "")
                         bp["url"] = resolveUrl(bp["url"] ?? "")
                         return {"sourcePicture": sp, "bigPicture": bp}
                     })() : undefined,
                     "fileElem": ct === 105 ? {
-                        "fileName": parsed["fileName"] ?? parsed["name"] ?? "",
-                        "sourceUrl": resolveUrl(parsed["sourceUrl"] ?? parsed["url"] ?? ""),
-                        "fileSize": parsed["fileSize"] ?? parsed["size"] ?? 0
+                        "fileName": p["fileName"] ?? p["name"] ?? "",
+                        "sourceUrl": resolveUrl(p["sourceUrl"] ?? p["url"] ?? ""),
+                        "fileSize": p["fileSize"] ?? p["size"] ?? 0
                     } : undefined,
                     "voiceElem": ct === 103 ? {
-                        "sourceUrl": resolveUrl(parsed["url"] ?? parsed["sourceUrl"] ?? ""),
-                        "duration": parsed["duration"] ?? 0
+                        "sourceUrl": resolveUrl(p["url"] ?? p["sourceUrl"] ?? ""),
+                        "duration": p["duration"] ?? 0
                     } : undefined
                 }
-                chatModel.appendMessage(obj)
+                parsed.push(obj)
+
+                // 跟踪最小 seq 用于分页
+                var seq = m["seq"] ?? 0
+                if (seq > 0 && (oldestSeq === 0 || seq < oldestSeq))
+                    oldestSeq = seq
+            }
+
+            if (loadingMore) {
+                // 向上加载更多：批量插入到列表头部
+                chatModel.prependMessages(parsed)
+                loadingMore = false
+            } else {
+                // 初次加载：清空后逐条添加
+                chatModel.clear()
+                for (var j = 0; j < parsed.length; j++)
+                    chatModel.appendMessage(parsed[j])
             }
         }
 

@@ -39,8 +39,8 @@ public:
     Q_INVOKABLE void sendMessage(const QString &recvId, int contentType,
                                   const QString &content, const QString &clientMsgId);
 
-    // 加载与某个用户的历史聊天记录
-    Q_INVOKABLE void loadHistory(const QString &peerUserId);
+    // 加载与某个用户的历史聊天记录（支持分页）
+    Q_INVOKABLE void loadHistory(const QString &peerUserId, qint64 beforeSeq = 0, int limit = 50);
 
 signals:
     void connectedChanged();                                    // 连接状态变化
@@ -49,7 +49,7 @@ signals:
     // 发送消息应答：服务端确认发送状态
     void messageAck(const QString &clientMsgId, int status, const QString &serverMsgId, qint64 sendTime);
     // 历史消息加载完成
-    void historyLoaded(const QString &peerUserId, const QJsonArray &messages);
+    void historyLoaded(const QString &peerUserId, const QJsonArray &messages, bool hasMore);
     // 服务器端联系人列表发生变化
     void contactsUpdated();
     // 连接错误

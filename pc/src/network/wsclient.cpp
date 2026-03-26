@@ -172,11 +172,15 @@ void WsClient::checkAckTimeouts()
     }
 }
 
-void WsClient::loadHistory(const QString &peerUserId)
+void WsClient::loadHistory(const QString &peerUserId, qint64 beforeSeq, int limit)
 {
-    qDebug() << "[WsClient] loadHistory connected=" << m_connected << "peerUserId=" << peerUserId;
+    qDebug() << "[WsClient] loadHistory connected=" << m_connected << "peerUserId=" << peerUserId
+             << "beforeSeq=" << beforeSeq << "limit=" << limit;
     QJsonObject data;
     data["peerUserId"] = peerUserId;
+    if (beforeSeq > 0)
+        data["beforeSeq"] = beforeSeq;
+    data["limit"] = limit;
 
     QJsonObject envelope;
     envelope["type"] = QStringLiteral("load_history");
@@ -274,7 +278,8 @@ void WsClient::handleWsMessage(const QJsonObject &envelope)
     } else if (type == "history") {
         QString peerUserId = data["peerUserId"].toString();
         QJsonArray messages = data["messages"].toArray();
-        emit historyLoaded(peerUserId, messages);
+        bool hasMore = data["hasMore"].toBool(false);
+        emit historyLoaded(peerUserId, messages, hasMore);
     } else if (type == "contacts_updated") {
         emit contactsUpdated();
     }
