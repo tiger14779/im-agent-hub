@@ -58,6 +58,7 @@ class ChatWsService {
   private pingTimer: ReturnType<typeof setInterval> | null = null
   private connected = false
   private intentionalClose = false
+  private reconnectAttempts = 0
 
   /** Pending sends: clientMsgId → full payload + retry state */
   private pendingSends = new Map<string, {
@@ -65,7 +66,7 @@ class ChatWsService {
     timer: ReturnType<typeof setTimeout> | null
     retries: number
   }>()
-  private static readonly ACK_TIMEOUT = 15000 // 15s per attempt
+  private static readonly ACK_TIMEOUT = 8000 // 8s per attempt
   private static readonly MAX_RETRIES = 2     // retry up to 2 times on reconnect
 
   // Callbacks
@@ -104,6 +105,7 @@ class ChatWsService {
 
     this.ws.onopen = () => {
       this.connected = true
+      this.reconnectAttempts = 0
       this.onConnected()
       this.startPing()
       this.flushPendingSends()
@@ -211,9 +213,12 @@ class ChatWsService {
     this.pendingSends.set(payload.clientMsgId, entry)
     if (this.send('send_message', payload)) {
       this.startAckTimer(payload.clientMsgId)
+    } else {
+      // Send failed — trigger immediate reconnect
+      if (!this.reconnectTimer && !this.intentionalClose) {
+        this.scheduleReconnect()
+      }
     }
-    // If send returns false (not connected), message stays in pendingSends
-    // and will be flushed on reconnect via flushPendingSends()
   }
 
   /** Start ACK timeout for a specific message */
@@ -380,13 +385,17 @@ class ChatWsService {
 
   private scheduleReconnect() {
     if (this.reconnectTimer) return
+    // Exponential backoff: 0 → 1s → 3s → 6s → 12s → 30s
+    const delays = [0, 1000, 3000, 6000, 12000, 30000]
+    const delay = delays[Math.min(this.reconnectAttempts, delays.length - 1)]
+    this.reconnectAttempts++
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
       if (!this.intentionalClose) {
-        console.log('[WS] reconnecting...')
+        console.log('[WS] reconnecting... attempt', this.reconnectAttempts)
         this.doConnect()
       }
-    }, 3000)
+    }, delay)
   }
 }
 

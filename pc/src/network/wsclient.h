@@ -6,6 +6,8 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QTimer>
+#include <QMap>
+#include <QDateTime>
 #include <QtQml/qqmlregistration.h>
 
 /**
@@ -62,19 +64,40 @@ private slots:
     void sendPing();                                    // 发送心跳 ping
 
 private:
+    // 待发送消息结构体（支持断线重发）
+    struct PendingSend {
+        QString recvId;
+        int contentType;
+        QString content;
+        QString clientMsgId;
+        int retries = 0;
+        qint64 sentAt = 0; // 最近一次发送的时间戳(ms)
+    };
+
+    static constexpr int ACK_TIMEOUT_MS = 8000;  // ACK 超时 8 秒
+    static constexpr int MAX_RETRIES = 2;         // 最多重试 2 次
+
     // 解析服务器下发的 WS 消息信封（分发到对应信号）
     void handleWsMessage(const QJsonObject &envelope);
     // 内部发起 WS 连接（构造 URL 并 open）
     void doConnect();
+    // 内部实际发送一条消息到 WS
+    void doSendMessage(PendingSend &ps);
+    // 重连后自动重发所有待发消息
+    void flushPendingSends();
+    // 定期检查 ACK 超时
+    void checkAckTimeouts();
 
     QWebSocket m_ws;               // WebSocket 实例
     QTimer m_reconnectTimer;       // 重连定时器（断线后指数退避重连）
     QTimer m_pingTimer;            // 心跳定时器（每25秒发送 ping）
+    QTimer m_ackCheckTimer;        // ACK 超时检查定时器（每2秒检查）
     QString m_baseUrl;             // 服务器基础地址，清空表示不再重连
     QString m_staffId;             // 客服人员ID
     QString m_token;               // 认证令牌
     bool m_connected = false;      // 当前连接状态
     int m_reconnectAttempts = 0;   // 已重连次数（用于指数退避计算）
+    QMap<QString, PendingSend> m_pendingSends; // 待确认消息队列
 };
 
 #endif // WSCLIENT_H
