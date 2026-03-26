@@ -19,6 +19,7 @@ Page {
     property int oldestSeq: 0            // 当前最旧消息的 seq（用于向上加载更多）
     property bool hasMoreHistory: true  // 是否还有更多历史消息
     property bool loadingMore: false    // 是否正在加载更多
+    property bool _mergeMode: false     // 历史消息合并模式（重连/定时同步时使用）
 
     // 当前 Tab页: 0=聊天列表, 1=通讯录
     property int currentTab: 0
@@ -31,6 +32,21 @@ Page {
         id: notifyPlayer
         source: "qrc:/ImAgentHub/resources/notify.wav"
         audioOutput: AudioOutput { volume: 0.6 }
+    }
+
+    // 定时同步：每30秒检查当前会话是否有遗漏的消息
+    Timer {
+        id: syncTimer
+        interval: 30000
+        running: WsClient.connected && activeChatId.length > 0
+        repeat: true
+        onTriggered: {
+            if (!loadingMore && !_mergeMode) {
+                console.log("[ChatPage] periodic sync for", activeChatId)
+                _mergeMode = true
+                WsClient.loadHistory(activeChatId, 0, 20)
+            }
+        }
     }
 
     background: Rectangle { color: "#ebebeb" }
@@ -865,9 +881,12 @@ Page {
         // 历史消息加载完成
         function onHistoryLoaded(peerUserId, messages, hasMore) {
             console.log("[ChatPage] onHistoryLoaded peer:", peerUserId,
-                        "active:", activeChatId, "msgCount:", messages.length, "hasMore:", hasMore)
-            if (peerUserId !== activeChatId) return
-            hasMoreHistory = hasMore
+                        "active:", activeChatId, "msgCount:", messages.length,
+                        "hasMore:", hasMore, "merge:", _mergeMode)
+            if (peerUserId !== activeChatId) {
+                _mergeMode = false
+                return
+            }
 
             // 将服务器消息转换为 chatModel 可用的 JSON 对象数组
             var parsed = []
@@ -912,6 +931,22 @@ Page {
                     oldestSeq = seq
             }
 
+            if (_mergeMode) {
+                // 合并模式（重连/定时同步）：仅追加新消息，appendMessage 内置去重
+                _mergeMode = false
+                var mergedCount = 0
+                var beforeCount = chatModel.count
+                for (var j = 0; j < parsed.length; j++) {
+                    chatModel.appendMessage(parsed[j])
+                }
+                mergedCount = chatModel.count - beforeCount
+                if (mergedCount > 0) {
+                    console.log("[ChatPage] sync merged", mergedCount, "new messages")
+                }
+                return
+            }
+
+            hasMoreHistory = hasMore
             if (loadingMore) {
                 // 向上加载更多：批量插入到列表头部
                 chatModel.prependMessages(parsed)
@@ -923,14 +958,12 @@ Page {
             }
         }
 
-        // WS 重连后：如果当前有打开的会话且消息为空，重新加载历史
+        // WS 重连后：同步当前会话的最新消息（合并模式，不清空已有消息）
         function onConnectedChanged() {
-            if (WsClient.connected && activeChatId && chatModel.count === 0) {
-                console.log("[ChatPage] WS reconnected, reloading history for", activeChatId)
-                oldestSeq = 0
-                hasMoreHistory = true
-                loadingMore = false
-                WsClient.loadHistory(activeChatId)
+            if (WsClient.connected && activeChatId) {
+                console.log("[ChatPage] WS reconnected, syncing history for", activeChatId)
+                _mergeMode = true
+                WsClient.loadHistory(activeChatId, 0, 50)
             }
         }
 

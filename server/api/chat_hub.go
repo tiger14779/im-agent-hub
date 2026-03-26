@@ -21,8 +21,8 @@ var wsUpgrader = websocket.Upgrader{
 
 const (
 	writeWait  = 10 * time.Second // max time to write a message
-	pongWait   = 60 * time.Second // max time between pongs from client
-	pingPeriod = 50 * time.Second // must be < pongWait
+	pongWait   = 30 * time.Second // max time between pongs from client
+	pingPeriod = 20 * time.Second // must be < pongWait
 )
 
 // ChatHub manages all WebSocket connections and message routing.
@@ -149,6 +149,26 @@ func (h *ChatHub) upgradeAndServe(c *gin.Context, userID, role string) {
 	if old, ok := h.clients[userID]; ok {
 		close(old.stopCh)
 		old.conn.Close()
+		// Drain any queued messages from old sendCh into the new connection,
+		// preventing message loss during reconnection.
+		go func(oldCh, newCh chan []byte) {
+			for {
+				select {
+				case msg, ok := <-oldCh:
+					if !ok {
+						return
+					}
+					select {
+					case newCh <- msg:
+						log.Printf("[WS] drained 1 message from old sendCh to new for %s", userID)
+					default:
+						log.Printf("[WS] new sendCh full while draining for %s, message dropped", userID)
+					}
+				default:
+					return // no more queued messages
+				}
+			}
+		}(old.sendCh, cc.sendCh)
 	}
 	h.clients[userID] = cc
 	h.mu.Unlock()

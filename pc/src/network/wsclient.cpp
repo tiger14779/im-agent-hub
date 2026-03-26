@@ -24,8 +24,8 @@ WsClient::WsClient(QObject *parent)
     m_reconnectTimer.setSingleShot(true);
     connect(&m_reconnectTimer, &QTimer::timeout, this, &WsClient::tryReconnect);
 
-    // 每25秒发送一次心跳 ping，防止连接被中间网络设备关闭
-    m_pingTimer.setInterval(25000);
+    // 每15秒发送一次心跳 ping，防止连接被中间网络设备关闭
+    m_pingTimer.setInterval(15000);
     connect(&m_pingTimer, &QTimer::timeout, this, &WsClient::sendPing);
 
     // 每2秒检查一次 ACK 超时
