@@ -15,21 +15,24 @@ ListView {
 
     signal requestLoadMore()            // 向上滚动到顶部时触发
 
-    // 记录是否用户主动向上滚动（用来决定新消息是否自动滚到底部）
-    property bool _userScrolledUp: false
     // 加载更多前记录的 contentHeight，用于恢复滚动位置
     property real _prevContentHeight: 0
     // 上次 count，用于区分 prepend（头部加载）和 append（新消息）
     property int _prevCount: 0
+
+    // 实时计算是否在底部附近（150px 余量），不再用 flag 追踪
+    function _isNearBottom() {
+        return contentHeight <= height ||
+               (contentY + height + 150) >= contentHeight
+    }
 
     onCountChanged: {
         var added = count - _prevCount
         _prevCount = count
 
         if (added <= 0) {
-            // clear() 或 model reset —— 重置所有滚动状态
+            // clear() 或 model reset
             _prevContentHeight = 0
-            _userScrolledUp = false
             Qt.callLater(function() { msgList.positionViewAtEnd() })
         } else if (_prevContentHeight > 0) {
             // 在头部插入旧消息后，恢复滚动位置
@@ -39,42 +42,22 @@ ListView {
                 _prevContentHeight = 0
             })
         } else {
-            // 新消息追加到尾部：除非用户明确上滚过，否则自动滚到底部
-            if (!_userScrolledUp) {
+            // 新消息追加到尾部：直接检查当前位置，在底部附近则自动滚到底
+            if (_isNearBottom()) {
                 Qt.callLater(function() { msgList.positionViewAtEnd() })
             }
         }
     }
 
-    // 内容高度变化时：delegate 延迟渲染可能导致 positionViewAtEnd 后高度再次增长，
-    // 此时需要二次滚到底部
+    // delegate 延迟渲染可能导致 positionViewAtEnd 后高度再次增长，
+    // 在底部附近时二次补偿滚动
     onContentHeightChanged: {
-        if (_prevContentHeight === 0 && !_userScrolledUp && contentHeight > height) {
+        if (_prevContentHeight === 0 && contentHeight > height && _isNearBottom()) {
             Qt.callLater(function() { msgList.positionViewAtEnd() })
         }
     }
 
-    // 仅在用户手势（拖拽/滑动）停止后判断是否上滚，
-    // 程序触发的 positionViewAtEnd() 不会触发此信号，彻底避免误判
-    onMovementEnded: {
-        if (contentHeight <= height) {
-            _userScrolledUp = false
-        } else {
-            var atBottom = (contentY + height + 120) >= contentHeight
-            _userScrolledUp = !atBottom
-        }
-    }
-
     onContentYChanged: {
-        // 单向重置：到达底部时重置为 false（覆盖鼠标滚轮回到底部的场景）
-        // 注意：永远不在此处设为 true，避免内容高度增长时的布局调整被误判为用户上滚
-        if (contentHeight > height) {
-            var atBottom = (contentY + height + 120) >= contentHeight
-            if (atBottom) _userScrolledUp = false
-        } else {
-            _userScrolledUp = false
-        }
-
         // 滚动到顶部附近时触发加载更多
         if (contentY < 50 && hasMore && !loadingMore && count > 0) {
             _prevContentHeight = contentHeight
