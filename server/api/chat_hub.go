@@ -189,7 +189,8 @@ func (h *ChatHub) handleSendMessage(cc *ChatConn, data json.RawMessage) {
 	msg, err := h.msgSvc.SaveMessage(cc.userID, req.RecvID, req.ContentType, contentStr, req.ClientMsgID)
 	if err != nil {
 		log.Printf("[WS] save message error: %v", err)
-		h.sendJSON(cc, map[string]interface{}{
+		// 发送失败 ACK 给发送者（查找当前最新连接）
+		h.sendToUser(cc.userID, map[string]interface{}{
 			"type": "message_ack",
 			"data": map[string]interface{}{
 				"clientMsgId": req.ClientMsgID,
@@ -200,8 +201,8 @@ func (h *ChatHub) handleSendMessage(cc *ChatConn, data json.RawMessage) {
 		return
 	}
 
-	// ACK back to sender
-	h.sendJSON(cc, map[string]interface{}{
+	// ACK back to sender（查找当前最新连接，防止重连后旧连接已关闭）
+	h.sendToUser(cc.userID, map[string]interface{}{
 		"type": "message_ack",
 		"data": map[string]interface{}{
 			"clientMsgId": req.ClientMsgID,
@@ -213,27 +214,21 @@ func (h *ChatHub) handleSendMessage(cc *ChatConn, data json.RawMessage) {
 	})
 
 	// Push to receiver if online
-	h.mu.RLock()
-	receiverConn, online := h.clients[req.RecvID]
-	h.mu.RUnlock()
-
-	if online {
-		h.sendJSON(receiverConn, map[string]interface{}{
-			"type": "new_message",
-			"data": map[string]interface{}{
-				"serverMsgID":    msg.ServerMsgID,
-				"clientMsgID":    msg.ClientMsgID,
-				"sendID":         msg.SendID,
-				"recvID":         msg.RecvID,
-				"conversationID": msg.ConversationID,
-				"contentType":    msg.ContentType,
-				"content":        msg.Content,
-				"sendTime":       msg.SendTime,
-				"seq":            msg.Seq,
-				"status":         msg.Status,
-			},
-		})
-	}
+	h.sendToUser(req.RecvID, map[string]interface{}{
+		"type": "new_message",
+		"data": map[string]interface{}{
+			"serverMsgID":    msg.ServerMsgID,
+			"clientMsgID":    msg.ClientMsgID,
+			"sendID":         msg.SendID,
+			"recvID":         msg.RecvID,
+			"conversationID": msg.ConversationID,
+			"contentType":    msg.ContentType,
+			"content":        msg.Content,
+			"sendTime":       msg.SendTime,
+			"seq":            msg.Seq,
+			"status":         msg.Status,
+		},
+	})
 }
 
 // handleLoadHistory returns message history for a conversation.
@@ -292,6 +287,17 @@ func (h *ChatHub) sendJSON(cc *ChatConn, v interface{}) {
 	defer cc.mu.Unlock()
 	if err := cc.conn.WriteJSON(v); err != nil {
 		log.Printf("[WS] write error to %s: %v", cc.userID, err)
+	}
+}
+
+// sendToUser looks up the CURRENT connection for userID and sends.
+// This is safe even if the user has reconnected (uses latest connection).
+func (h *ChatHub) sendToUser(userID string, v interface{}) {
+	h.mu.RLock()
+	conn, ok := h.clients[userID]
+	h.mu.RUnlock()
+	if ok {
+		h.sendJSON(conn, v)
 	}
 }
 

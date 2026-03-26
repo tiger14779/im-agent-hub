@@ -21,10 +21,19 @@ func Init() {
 		log.Fatalf("failed to create data directory: %v", err)
 	}
 
-	db, err := gorm.Open(sqlite.Open("./data/agent_hub.db"), &gorm.Config{})
+	// 启用 WAL 模式和 busy_timeout，支持并发读写，避免 "database is locked" 错误
+	dsn := "./data/agent_hub.db?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("failed to open database: %v", err)
 	}
+
+	// 限制最大连接数为1，防止 SQLite 并发写入冲突
+	sqlDB, err := db.DB()
+	if err != nil {
+		log.Fatalf("failed to get underlying sql.DB: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
 
 	if err := db.AutoMigrate(&model.User{}, &model.ServiceStaff{}, &model.Admin{}, &model.Message{}, &model.Conversation{}); err != nil {
 		log.Fatalf("failed to auto-migrate: %v", err)
