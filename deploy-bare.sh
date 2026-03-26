@@ -49,6 +49,10 @@ info "=========================================="
 info "  IM Agent Hub 裸机一键部署"
 info "=========================================="
 
+# ---------- 抑制交互式提示（needrestart / debconf）----------
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+
 # ---------- 系统更新 ----------
 info "更新系统软件包..."
 apt-get update -qq
