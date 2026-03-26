@@ -169,7 +169,7 @@ func (h *ChatHub) readLoop(cc *ChatConn) {
 
 		switch env.Type {
 		case "send_message":
-			h.handleSendMessage(cc, env.Data)
+			go h.handleSendMessage(cc, env.Data)
 		case "load_history":
 			h.handleLoadHistory(cc, env.Data)
 		case "mark_read":

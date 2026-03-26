@@ -59,9 +59,14 @@ class ChatWsService {
   private connected = false
   private intentionalClose = false
 
-  /** Pending ACKs: clientMsgId → timeout handle */
-  private pendingAcks = new Map<string, ReturnType<typeof setTimeout>>()
-  private static readonly ACK_TIMEOUT = 15000 // 15 seconds
+  /** Pending sends: clientMsgId → full payload + retry state */
+  private pendingSends = new Map<string, {
+    payload: { recvId: string; contentType: number; content: string; clientMsgId: string }
+    timer: ReturnType<typeof setTimeout> | null
+    retries: number
+  }>()
+  private static readonly ACK_TIMEOUT = 15000 // 15s per attempt
+  private static readonly MAX_RETRIES = 2     // retry up to 2 times on reconnect
 
   // Callbacks
   onNewMessage: (msg: Message) => void = () => {}
@@ -101,6 +106,7 @@ class ChatWsService {
       this.connected = true
       this.onConnected()
       this.startPing()
+      this.flushPendingSends()
     }
 
     this.ws.onmessage = (ev) => {
@@ -115,10 +121,12 @@ class ChatWsService {
     this.ws.onclose = () => {
       this.connected = false
       this.stopPing()
-      this.failAllPendingAcks()
+      this.pausePendingTimers()
       this.onDisconnected()
       if (!this.intentionalClose) {
         this.scheduleReconnect()
+      } else {
+        this.failAllPending('连接已关闭')
       }
     }
 
@@ -136,7 +144,7 @@ class ChatWsService {
       }
       case 'message_ack': {
         const ack = env.data as AckData
-        this.clearPendingAck(ack.clientMsgId)
+        this.removePending(ack.clientMsgId)
         this.onAck(ack)
         break
       }
@@ -192,87 +200,127 @@ class ChatWsService {
   private send(type: string, data: unknown) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type, data }))
+      return true
     }
+    return false
   }
 
-  /** Track a sent message and fire a fail-ACK if no response within timeout */
-  private trackPendingAck(clientMsgId: string) {
-    this.clearPendingAck(clientMsgId)
-    const timer = setTimeout(() => {
-      this.pendingAcks.delete(clientMsgId)
-      console.warn('[WS] ACK timeout for', clientMsgId)
-      this.onAck({ clientMsgId, status: 3, error: '发送超时，请重试' })
+  /** Enqueue a message send with retry support */
+  private sendMessage(payload: { recvId: string; contentType: number; content: string; clientMsgId: string }) {
+    const entry = { payload, timer: null as ReturnType<typeof setTimeout> | null, retries: 0 }
+    this.pendingSends.set(payload.clientMsgId, entry)
+    if (this.send('send_message', payload)) {
+      this.startAckTimer(payload.clientMsgId)
+    }
+    // If send returns false (not connected), message stays in pendingSends
+    // and will be flushed on reconnect via flushPendingSends()
+  }
+
+  /** Start ACK timeout for a specific message */
+  private startAckTimer(clientMsgId: string) {
+    const entry = this.pendingSends.get(clientMsgId)
+    if (!entry) return
+    if (entry.timer) clearTimeout(entry.timer)
+    entry.timer = setTimeout(() => {
+      entry.timer = null
+      // Only fail if still connected (true timeout). If disconnected, will be retried.
+      if (this.connected) {
+        this.pendingSends.delete(clientMsgId)
+        console.warn('[WS] ACK timeout for', clientMsgId)
+        this.onAck({ clientMsgId, status: 3, error: '发送超时，请重试' })
+      }
     }, ChatWsService.ACK_TIMEOUT)
-    this.pendingAcks.set(clientMsgId, timer)
   }
 
-  private clearPendingAck(clientMsgId: string) {
-    const timer = this.pendingAcks.get(clientMsgId)
-    if (timer) {
-      clearTimeout(timer)
-      this.pendingAcks.delete(clientMsgId)
+  /** Remove a message from pending (ACK received) */
+  private removePending(clientMsgId: string) {
+    const entry = this.pendingSends.get(clientMsgId)
+    if (entry) {
+      if (entry.timer) clearTimeout(entry.timer)
+      this.pendingSends.delete(clientMsgId)
     }
   }
 
-  /** Fail all pending ACKs (called on disconnect) */
-  private failAllPendingAcks() {
-    for (const [id, timer] of this.pendingAcks) {
-      clearTimeout(timer)
-      this.onAck({ clientMsgId: id, status: 3, error: '连接断开，请重试' })
+  /** Pause all ACK timers on disconnect (don't fail — will retry) */
+  private pausePendingTimers() {
+    for (const entry of this.pendingSends.values()) {
+      if (entry.timer) {
+        clearTimeout(entry.timer)
+        entry.timer = null
+      }
     }
-    this.pendingAcks.clear()
+  }
+
+  /** Resend all pending messages after reconnect */
+  private flushPendingSends() {
+    for (const [clientMsgId, entry] of this.pendingSends) {
+      entry.retries++
+      if (entry.retries > ChatWsService.MAX_RETRIES) {
+        this.pendingSends.delete(clientMsgId)
+        this.onAck({ clientMsgId, status: 3, error: '多次重试失败' })
+        continue
+      }
+      if (this.send('send_message', entry.payload)) {
+        this.startAckTimer(clientMsgId)
+      }
+    }
+  }
+
+  /** Fail all pending messages (only on intentional close) */
+  private failAllPending(reason: string) {
+    for (const [id, entry] of this.pendingSends) {
+      if (entry.timer) clearTimeout(entry.timer)
+      this.onAck({ clientMsgId: id, status: 3, error: reason })
+    }
+    this.pendingSends.clear()
   }
 
   // ── Public API ─────────────────────────────────────────────
 
   sendTextMessage(recvId: string, text: string): string {
     const clientMsgId = uuid()
-    this.send('send_message', {
+    this.sendMessage({
       recvId,
       contentType: 101,
       content: JSON.stringify({ text }),
       clientMsgId
     })
-    this.trackPendingAck(clientMsgId)
     return clientMsgId
   }
 
   async sendImageMessage(recvId: string, file: File): Promise<string> {
     const url = await this.uploadFile(file)
     const clientMsgId = uuid()
-    this.send('send_message', {
+    this.sendMessage({
       recvId,
       contentType: 102,
       content: JSON.stringify({ url, name: file.name, size: file.size, type: file.type }),
       clientMsgId
     })
-    this.trackPendingAck(clientMsgId)
     return clientMsgId
   }
 
   async sendVoiceMessage(recvId: string, blob: Blob, duration: number): Promise<string> {
     const url = await this.uploadFile(new File([blob], 'voice.webm', { type: blob.type }))
     const clientMsgId = uuid()
-    this.send('send_message', {
+    this.sendMessage({
       recvId,
       contentType: 103,
       content: JSON.stringify({ url, duration, size: blob.size }),
       clientMsgId
     })
-    this.trackPendingAck(clientMsgId)
     return clientMsgId
   }
 
   async sendFileMessage(recvId: string, file: File): Promise<string> {
     const url = await this.uploadFile(file)
     const clientMsgId = uuid()
-    this.send('send_message', {
+    this.sendMessage({
       recvId,
       contentType: 105,
       content: JSON.stringify({ url, name: file.name, size: file.size, type: file.type }),
       clientMsgId
     })
-    this.trackPendingAck(clientMsgId)
     return clientMsgId
   }
 
@@ -291,6 +339,7 @@ class ChatWsService {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
     }
+    this.failAllPending('连接已关闭')
     if (this.ws) {
       this.ws.close()
       this.ws = null
