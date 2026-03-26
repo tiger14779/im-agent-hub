@@ -81,6 +81,9 @@ public:
     // 生成唯一消息ID（桥接器发送到非当前会话时使用）
     Q_INVOKABLE QString generateMsgId();
 
+    // 检查是否已存在指定 clientMsgID 的消息（用于去重）
+    Q_INVOKABLE bool hasMessage(const QString &clientMsgID) const;
+
     // 清空所有消息（切换会话时调用）
     Q_INVOKABLE void clear();
 

@@ -69,6 +69,7 @@ private:
     QTcpServer *m_server = nullptr;        // TCP 服务器实例
     QNetworkAccessManager m_nam;           // 用于推送数据的网络管理器
     QHash<QTcpSocket*, QByteArray> m_buffers; // 各连接的接收缓冲区
+    QHash<QString, qint64> m_recentCommands;  // 去重：type+wxid+path → 时间戳（5秒窗口）
 
     bool m_listening = false;
     static constexpr int m_apiPort = 8888;       // 监听端口：接收财务软件指令

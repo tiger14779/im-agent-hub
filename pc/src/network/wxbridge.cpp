@@ -74,24 +74,27 @@ void WxBridge::onNewConnection()
         connect(socket, &QTcpSocket::readyRead, this, [this, socket]() {
             m_buffers[socket].append(socket->readAll());
 
-            if (!m_buffers[socket].contains("\r\n\r\n"))
+            // 使用原始字节在 QByteArray 上查找 header 结束位置，
+            // 避免 UTF-8 → QString 转换导致字节偏移与字符偏移不一致
+            int headerEndBytes = m_buffers[socket].indexOf("\r\n\r\n");
+            if (headerEndBytes < 0)
                 return;
 
-            QString fullRequest = QString::fromUtf8(m_buffers[socket]);
-            int headerEnd = fullRequest.indexOf("\r\n\r\n");
-            QString headers = fullRequest.left(headerEnd);
-
+            // 从原始字节中解析 Content-Length
+            QByteArray headersPart = m_buffers[socket].left(headerEndBytes);
             static QRegularExpression clRegex(
                 "Content-Length:\\s*(\\d+)", QRegularExpression::CaseInsensitiveOption);
-            QRegularExpressionMatch match = clRegex.match(headers);
+            QRegularExpressionMatch match = clRegex.match(QString::fromLatin1(headersPart));
             int expectedBody = match.hasMatch() ? match.captured(1).toInt() : 0;
 
-            int currentBody = m_buffers[socket].size() - (headerEnd + 4);
+            int currentBody = m_buffers[socket].size() - (headerEndBytes + 4);
             if (currentBody < expectedBody)
                 return;
 
-            QString body = fullRequest.mid(headerEnd + 4);
-            qDebug() << "[WxBridge] API request:" << body.left(300);
+            // 精确提取 Content-Length 字节的 body（防止 HTTP 管线化串扰）
+            QByteArray rawBody = m_buffers[socket].mid(headerEndBytes + 4, expectedBody);
+            QString body = QString::fromUtf8(rawBody);
+            qDebug() << "[WxBridge] API request:" << body.left(500);
 
             m_buffers.remove(socket);
             handleApiRequest(body, socket);
@@ -133,6 +136,23 @@ void WxBridge::handleApiRequest(const QString &body, QTcpSocket *socket)
 
     qDebug() << "[WxBridge] Command type:" << type;
 
+    // 文件/图片发送去重：5秒内相同 type+wxid+path 的请求只处理一次
+    if (type == "Q0011" || type == "Q0030") {
+        QString dedupKey = type + "|" + data["wxid"].toString() + "|" + data["path"].toString();
+        qint64 now = QDateTime::currentMSecsSinceEpoch();
+        if (m_recentCommands.contains(dedupKey) && (now - m_recentCommands[dedupKey]) < 5000) {
+            qDebug() << "[WxBridge] Dedup: ignoring duplicate" << type << "within 5s window";
+            sendResponse({{"status", "ok"}, {"type", type}, {"dedup", true}});
+            return;
+        }
+        m_recentCommands[dedupKey] = now;
+        // 清理过期去重记录（超过10秒）
+        for (auto it = m_recentCommands.begin(); it != m_recentCommands.end(); ) {
+            if (now - it.value() > 10000) it = m_recentCommands.erase(it);
+            else ++it;
+        }
+    }
+
     if (type == "Q0001") {
         // 发送文本消息
         QString wxid = data["wxid"].toString();
@@ -159,6 +179,8 @@ void WxBridge::handleApiRequest(const QString &body, QTcpSocket *socket)
         // 发送文件
         QString wxid = data["wxid"].toString();
         QString path = data["path"].toString();
+        qDebug() << "[WxBridge] Q0030 file send: wxid=" << wxid << "path=" << path
+                 << "pathLen=" << path.length();
         if (!wxid.isEmpty() && !path.isEmpty()) {
             emit apiSendFile(wxid, path);
             sendResponse({{"status", "ok"}, {"type", type}});

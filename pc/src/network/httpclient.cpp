@@ -147,6 +147,7 @@ void HttpClient::uploadFile(const QString &filePath)
     QFileInfo fi(localPath);
     QString origName = fi.fileName();
     qint64 origSize = fi.size();
+    qDebug() << "[Upload] path=" << localPath << "fileName=" << origName << "size=" << origSize;
 
     // 检查上传缓存：相同文件（路径+大小+修改时间）直接复用已上传的URL
     QString cacheKey = localPath + "|" + QString::number(origSize) + "|" + fi.lastModified().toString(Qt::ISODate);

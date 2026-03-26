@@ -123,6 +123,17 @@ QString ChatModel::generateMsgId()
     return QUuid::createUuid().toString(QUuid::WithoutBraces);
 }
 
+bool ChatModel::hasMessage(const QString &clientMsgID) const
+{
+    if (clientMsgID.isEmpty())
+        return false;
+    for (const auto &m : m_messages) {
+        if (m.clientMsgID == clientMsgID)
+            return true;
+    }
+    return false;
+}
+
 void ChatModel::updateStatus(const QString &clientMsgID, int status)
 {
     for (int i = 0; i < m_messages.size(); ++i) {

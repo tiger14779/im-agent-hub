@@ -836,8 +836,14 @@ Page {
 
             // 若此消息属于当前打开的会话，添加到消息列表
             var peerID = sendID === staffUserId ? recvID : sendID
+            var msgId = chatMsg["clientMsgID"]
+            // 去重检查：如果当前会话已经有该消息，跳过所有副作用（声音、未读、推送）
+            var isDuplicate = (peerID === activeChatId && msgId.length > 0 && chatModel.hasMessage(msgId))
             console.log("[ChatPage] onNewMessage peerID=" + peerID + " activeChatId=" + activeChatId
-                        + " match=" + (peerID === activeChatId) + " modelCount=" + chatModel.count)
+                        + " match=" + (peerID === activeChatId) + " dup=" + isDuplicate
+                        + " modelCount=" + chatModel.count)
+            if (isDuplicate) return
+
             if (peerID === activeChatId) {
                 chatModel.appendMessage(chatMsg)
                 console.log("[ChatPage] appendMessage done, new count=" + chatModel.count)

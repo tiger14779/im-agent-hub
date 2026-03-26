@@ -257,7 +257,7 @@ func (h *ChatHub) handleSendMessage(cc *ChatConn, data json.RawMessage) {
 	log.Printf("[WS] send_message from=%s to=%s type=%d", cc.userID, req.RecvID, req.ContentType)
 
 	// Save to database
-	msg, err := h.msgSvc.SaveMessage(cc.userID, req.RecvID, req.ContentType, contentStr, req.ClientMsgID)
+	msg, isDup, err := h.msgSvc.SaveMessage(cc.userID, req.RecvID, req.ContentType, contentStr, req.ClientMsgID)
 	if err != nil {
 		log.Printf("[WS] save message error: %v", err)
 		// 发送失败 ACK 给发送者（查找当前最新连接）
@@ -283,6 +283,12 @@ func (h *ChatHub) handleSendMessage(cc *ChatConn, data json.RawMessage) {
 			"status":      2,
 		},
 	})
+
+	// 去重命中：只发ACK不推送，避免接收方收到重复消息
+	if isDup {
+		log.Printf("[WS] dedup: skipping push to %s for clientMsgID=%s", req.RecvID, req.ClientMsgID)
+		return
+	}
 
 	// Push to receiver if online
 	log.Printf("[WS] routing new_message from=%s to=%s seq=%d", cc.userID, req.RecvID, msg.Seq)

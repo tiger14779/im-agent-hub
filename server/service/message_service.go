@@ -52,13 +52,14 @@ func sortedPair(a, b string) (string, string) {
 
 // SaveMessage persists a message and updates the conversation.
 // It handles deduplication via clientMsgID.
-// Returns the saved message (with serverMsgID, seq, sendTime filled).
-func (s *MessageService) SaveMessage(sendID, recvID string, contentType int, content, clientMsgID string) (*model.Message, error) {
+// Returns the saved message (with serverMsgID, seq, sendTime filled) and whether it was a dedup hit.
+func (s *MessageService) SaveMessage(sendID, recvID string, contentType int, content, clientMsgID string) (*model.Message, bool, error) {
 	// Dedup: if clientMsgID already exists, return the existing message
 	if clientMsgID != "" {
 		var existing model.Message
 		if err := database.DB.Where("client_msg_id = ?", clientMsgID).First(&existing).Error; err == nil {
-			return &existing, nil
+			log.Printf("[MsgSvc] dedup hit: clientMsgID=%s already exists (seq=%d)", clientMsgID, existing.Seq)
+			return &existing, true, nil
 		}
 	}
 
@@ -123,10 +124,10 @@ func (s *MessageService) SaveMessage(sendID, recvID string, contentType int, con
 	})
 
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
-	return msg, nil
+	return msg, false, nil
 }
 
 // contentPreview generates a short preview string for the conversation list.
