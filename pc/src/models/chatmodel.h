@@ -78,6 +78,9 @@ public:
     // 更新临时消息的发送状态（1=发送中, 2=已发送, 3=失败）
     Q_INVOKABLE void updateStatus(const QString &clientMsgID, int status);
 
+    // 生成唯一消息ID（桥接器发送到非当前会话时使用）
+    Q_INVOKABLE QString generateMsgId();
+
     // 清空所有消息（切换会话时调用）
     Q_INVOKABLE void clear();
 

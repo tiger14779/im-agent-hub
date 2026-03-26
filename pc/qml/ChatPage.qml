@@ -628,7 +628,13 @@ Page {
                         "bigPicture":    {"url": url, "width": 0, "height": 0, "size": 0, "type": "image/png"},
                         "snapshotPicture": {"url": url, "width": 0, "height": 0, "size": 0, "type": "image/png"}
                     })
-                    var bImgMsgId = chatModel.addPendingMessage(bridgeTarget, 102, "", resolveUrl(url))
+                    // 只有目标是当前聊天对象时才插入消息列表，否则仅发送
+                    var bImgMsgId = ""
+                    if (bridgeTarget === activeChatId) {
+                        bImgMsgId = chatModel.addPendingMessage(bridgeTarget, 102, "", resolveUrl(url))
+                    } else {
+                        bImgMsgId = chatModel.generateMsgId()
+                    }
                     WsClient.sendMessage(bridgeTarget, 102, bImgContent, bImgMsgId)
                     contactModel.updateLastMessage(bridgeTarget, "[\u56FE\u7247]", Date.now())
                     WxBridge.pushMessageEvent(staffUserId, bridgeTarget, "[\u56FE\u7247]", true, 3)
@@ -637,7 +643,13 @@ Page {
                     var bFileContent = JSON.stringify({
                         "url": url, "name": origName, "size": origSize
                     })
-                    var bFileMsgId = chatModel.addPendingMessage(bridgeTarget, 105, "", "", origName, origSize)
+                    // 只有目标是当前聊天对象时才插入消息列表，否则仅发送
+                    var bFileMsgId = ""
+                    if (bridgeTarget === activeChatId) {
+                        bFileMsgId = chatModel.addPendingMessage(bridgeTarget, 105, "", "", origName, origSize)
+                    } else {
+                        bFileMsgId = chatModel.generateMsgId()
+                    }
                     WsClient.sendMessage(bridgeTarget, 105, bFileContent, bFileMsgId)
                     contactModel.updateLastMessage(bridgeTarget, "[\u6587\u4EF6]", Date.now())
                     WxBridge.pushMessageEvent(staffUserId, bridgeTarget, "[\u6587\u4EF6]", true, 49)

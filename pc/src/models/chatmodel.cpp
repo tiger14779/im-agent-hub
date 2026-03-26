@@ -118,6 +118,11 @@ QString ChatModel::addPendingMessage(const QString &recvId, int contentType,
     return msg.clientMsgID;
 }
 
+QString ChatModel::generateMsgId()
+{
+    return QUuid::createUuid().toString(QUuid::WithoutBraces);
+}
+
 void ChatModel::updateStatus(const QString &clientMsgID, int status)
 {
     for (int i = 0; i < m_messages.size(); ++i) {
