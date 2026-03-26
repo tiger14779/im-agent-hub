@@ -41,8 +41,19 @@ ListView {
         } else {
             // 新消息追加到尾部：除非用户明确上滚过，否则自动滚到底部
             if (!_userScrolledUp) {
-                Qt.callLater(function() { msgList.positionViewAtEnd() })
+                Qt.callLater(function() {
+                    msgList.positionViewAtEnd()
+                    _userScrolledUp = false   // 防止 positionViewAtEnd 后因布局延迟误判为上滚
+                })
             }
+        }
+    }
+
+    // 内容高度变化时：delegate 延迟渲染可能导致 positionViewAtEnd 后高度再次增长，
+    // 此时需要二次滚到底部，否则 _userScrolledUp 会被误判为 true
+    onContentHeightChanged: {
+        if (_prevContentHeight === 0 && !_userScrolledUp && contentHeight > height) {
+            Qt.callLater(function() { msgList.positionViewAtEnd() })
         }
     }
 
