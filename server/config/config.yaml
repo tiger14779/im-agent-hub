@@ -2,6 +2,13 @@ server:
   port: 8080
   jwt_secret: "im-agent-hub-jwt-secret-2024"
 
+database:
+  host: postgres
+  port: 5432
+  user: imhub
+  password: imhub2024
+  dbname: imhub
+
 admin:
   username: "admin"
   password: "admin123"

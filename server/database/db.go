@@ -1,42 +1,37 @@
 package database
 
 import (
+	"fmt"
 	"log"
-	"os"
 
 	"im-agent-hub/config"
 	"im-agent-hub/model"
 
-	"github.com/glebarez/sqlite"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
 // DB is the global database instance.
 var DB *gorm.DB
 
-// Init opens the SQLite database, runs migrations, and seeds the default admin.
+// Init opens the PostgreSQL database, runs migrations, and seeds the default admin.
 func Init() {
-	if err := os.MkdirAll("./data", 0755); err != nil {
-		log.Fatalf("failed to create data directory: %v", err)
-	}
+	cfg := config.Cfg.Database
+	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable TimeZone=Asia/Shanghai",
+		cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.DBName)
 
-	db, err := gorm.Open(sqlite.Open("./data/agent_hub.db"), &gorm.Config{})
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("failed to open database: %v", err)
 	}
 
-	// 限制最大连接数为1，防止 SQLite 并发写入冲突
 	sqlDB, err := db.DB()
 	if err != nil {
 		log.Fatalf("failed to get underlying sql.DB: %v", err)
 	}
-	sqlDB.SetMaxOpenConns(1)
-
-	// 启用 WAL 模式和 busy_timeout，支持并发读写，避免 "database is locked" 错误
-	// 必须在连接打开后用 Exec 执行 PRAGMA，不能放在 DSN 参数中（glebarez/sqlite 不支持 _pragma 参数）
-	db.Exec("PRAGMA journal_mode=WAL")
-	db.Exec("PRAGMA busy_timeout=5000")
+	sqlDB.SetMaxOpenConns(20)
+	sqlDB.SetMaxIdleConns(5)
 
 	if err := db.AutoMigrate(&model.User{}, &model.ServiceStaff{}, &model.Admin{}, &model.Message{}, &model.Conversation{}); err != nil {
 		log.Fatalf("failed to auto-migrate: %v", err)

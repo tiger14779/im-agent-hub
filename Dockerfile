@@ -15,15 +15,13 @@ RUN npm install
 COPY web/admin/ ./
 RUN npm run build
 
-# 阶段3：构建 Go 后端
+# 阶段3：构建 Go 后端（PostgreSQL 驱动 pgx 为纯 Go，无需 CGO）
 FROM golang:1.21-alpine AS backend-builder
 WORKDIR /app/server
-# 安装 GCC（sqlite3 cgo 依赖）
-RUN apk add --no-cache gcc musl-dev
 COPY server/go.mod server/go.sum ./
 RUN go mod download
 COPY server/ ./
-RUN CGO_ENABLED=1 GOOS=linux go build -a -o chat-app .
+RUN CGO_ENABLED=0 GOOS=linux go build -a -o chat-app .
 
 # 阶段4：最终运行镜像
 FROM alpine:latest

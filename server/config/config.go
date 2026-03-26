@@ -8,9 +8,10 @@ import (
 )
 
 type Config struct {
-	Server  ServerConfig  `mapstructure:"server"`
-	Admin   AdminConfig   `mapstructure:"admin"`
-	Cleanup CleanupConfig `mapstructure:"cleanup"`
+	Server   ServerConfig   `mapstructure:"server"`
+	Admin    AdminConfig    `mapstructure:"admin"`
+	Cleanup  CleanupConfig  `mapstructure:"cleanup"`
+	Database DatabaseConfig `mapstructure:"database"`
 }
 
 type ServerConfig struct {
@@ -27,6 +28,14 @@ type CleanupConfig struct {
 	Enabled       bool   `mapstructure:"enabled"`
 	RetentionDays int    `mapstructure:"retention_days"`
 	Cron          string `mapstructure:"cron"`
+}
+
+type DatabaseConfig struct {
+	Host     string `mapstructure:"host"`
+	Port     int    `mapstructure:"port"`
+	User     string `mapstructure:"user"`
+	Password string `mapstructure:"password"`
+	DBName   string `mapstructure:"dbname"`
 }
 
 // Cfg is the global configuration instance.

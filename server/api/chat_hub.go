@@ -55,8 +55,8 @@ func NewChatHub(msgSvc *service.MessageService) *ChatHub {
 		msgSvc:  msgSvc,
 		msgCh:   make(chan msgTask, 256), // buffered channel
 	}
-	// Start worker pool for message writes (2 workers to balance throughput & SQLite contention)
-	for i := 0; i < 2; i++ {
+	// Start worker pool for message writes (PostgreSQL supports full concurrency)
+	for i := 0; i < 20; i++ {
 		go h.msgWorker()
 	}
 	return h

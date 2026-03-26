@@ -1,6 +1,22 @@
 version: '3.8'
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: im-hub-postgres
+    environment:
+      POSTGRES_USER: imhub
+      POSTGRES_PASSWORD: imhub2024
+      POSTGRES_DB: imhub
+    volumes:
+      - im-hub-pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U imhub"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   im-agent-hub:
     build:
       context: .
@@ -9,11 +25,15 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      # 持久化数据库（重建容器不丢数据）
+      # 持久化上传文件
       - im-hub-data:/app/data
     environment:
       - TZ=Asia/Shanghai
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
   im-hub-data:
+  im-hub-pgdata:
