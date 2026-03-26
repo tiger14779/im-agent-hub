@@ -254,6 +254,18 @@ QJsonObject HttpClient::loadLoginConfig()
     return obj;
 }
 
+void HttpClient::setSetting(const QString &key, const QString &value)
+{
+    QSettings settings;
+    settings.setValue(key, value);
+}
+
+QString HttpClient::getSetting(const QString &key, const QString &defaultValue)
+{
+    QSettings settings;
+    return settings.value(key, defaultValue).toString();
+}
+
 // ── 文件下载 ─────────────────────────────────────────────
 
 void HttpClient::downloadAndOpen(const QString &url, const QString &fileName)

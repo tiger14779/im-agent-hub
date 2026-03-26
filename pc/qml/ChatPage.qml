@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Dialogs
+import QtMultimedia
 import ImAgentHub
 
 // 聊天主页 —— 包含左侧导航栏、中间联系人列表、右侧聊天区域
@@ -22,6 +23,16 @@ Page {
     // 当前 Tab页: 0=聊天列表, 1=通讯录
     property int currentTab: 0
 
+    // 消息提示音开关（持久化到 QSettings）
+    property bool notifySoundEnabled: true
+
+    // 消息提示音播放器
+    MediaPlayer {
+        id: notifyPlayer
+        source: "qrc:/ImAgentHub/resources/notify.wav"
+        audioOutput: AudioOutput { volume: 0.6 }
+    }
+
     background: Rectangle { color: "#ebebeb" }
 
     ChatModel { id: chatModel }
@@ -34,8 +45,12 @@ Page {
         return url ?? ""
     }
 
-    // 页面初始化：设置自己的ID、加载联系人、启动桥接服务
+    // 页面初始化
     Component.onCompleted: {
+        // 从 QSettings 读取提示音开关状态
+        var saved = HttpClient.getSetting("notify/soundEnabled", "true")
+        notifySoundEnabled = (saved === "true")
+
         chatModel.setSelfId(staffUserId)
         HttpClient.getContacts()
         WxBridge.startServer()
@@ -124,6 +139,31 @@ Page {
                 }
 
                 Item { Layout.fillHeight: true }
+
+                // 消息提示音开关按钮
+                Rectangle {
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.bottomMargin: 12
+                    width: 40; height: 40; radius: 6
+                    color: notifySoundEnabled ? "transparent" : "#444"
+                    Label {
+                        anchors.centerIn: parent
+                        text: notifySoundEnabled ? "\uD83D\uDD14" : "\uD83D\uDD15"   // 🔔 / 🔕
+                        font.pixelSize: 20
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            notifySoundEnabled = !notifySoundEnabled
+                            HttpClient.setSetting("notify/soundEnabled", notifySoundEnabled ? "true" : "false")
+                        }
+                    }
+                    ToolTip.visible: hovered
+                    ToolTip.text: notifySoundEnabled ? "提示音: 开" : "提示音: 关"
+                    property bool hovered: false
+                    HoverHandler { onHoveredChanged: parent.hovered = hovered }
+                }
             }
         }
 
@@ -739,6 +779,12 @@ Page {
             if (peerID === activeChatId) {
                 chatModel.appendMessage(chatMsg)
                 console.log("[ChatPage] appendMessage done, new count=" + chatModel.count)
+            }
+
+            // 播放消息提示音（仅收到别人的消息时）
+            if (sendID !== staffUserId && chatRoot.notifySoundEnabled) {
+                notifyPlayer.stop()
+                notifyPlayer.play()
             }
 
             // 更新联系人列表的最后消息预览

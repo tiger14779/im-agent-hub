@@ -73,6 +73,10 @@ public:
     // 读取上次保存的登录配置
     Q_INVOKABLE QJsonObject loadLoginConfig();
 
+    // === 通用设置存取 ===
+    Q_INVOKABLE void setSetting(const QString &key, const QString &value);
+    Q_INVOKABLE QString getSetting(const QString &key, const QString &defaultValue = {});
+
 signals:
     void baseUrlChanged();      // 服务器地址变更
     void tokenChanged();        // 认证令牌变更
