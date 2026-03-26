@@ -50,6 +50,11 @@ qt_add_executable(${PROJECT_NAME}
     ${HEADERS}
 )
 
+# Windows 下隐藏控制台窗口（仅 Release 生效）
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    WIN32_EXECUTABLE $<NOT:$<CONFIG:Debug>>
+)
+
 qt_add_qml_module(${PROJECT_NAME}
     URI ImAgentHub
     VERSION 1.0

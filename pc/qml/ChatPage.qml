@@ -171,6 +171,67 @@ Page {
                     }
                 }
 
+                // 搜索栏
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 40
+                    color: "#e7e7e7"
+
+                    Rectangle {
+                        anchors.fill: parent
+                        anchors.leftMargin: 10
+                        anchors.rightMargin: 10
+                        anchors.topMargin: 4
+                        anchors.bottomMargin: 6
+                        radius: 4
+                        color: "#fff"
+                        border.color: searchField.activeFocus ? "#07c160" : "#ddd"
+                        border.width: 1
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 8
+                            anchors.rightMargin: 4
+                            spacing: 4
+
+                            // 搜索图标
+                            Label {
+                                text: "\uD83D\uDD0D"
+                                font.pixelSize: 13
+                                color: "#999"
+                                Layout.alignment: Qt.AlignVCenter
+                            }
+
+                            TextField {
+                                id: searchField
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                placeholderText: "搜索"
+                                placeholderTextColor: "#bbb"
+                                font.pixelSize: 13
+                                color: "#333"
+                                background: Item {}
+                                verticalAlignment: Text.AlignVCenter
+                                onTextChanged: contactModel.filterText = text
+                            }
+
+                            // 清除按钮
+                            Label {
+                                text: "✕"
+                                font.pixelSize: 12
+                                color: "#999"
+                                visible: searchField.text.length > 0
+                                Layout.alignment: Qt.AlignVCenter
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: searchField.text = ""
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // 联系人列表组件
                 ContactList {
                     Layout.fillWidth: true

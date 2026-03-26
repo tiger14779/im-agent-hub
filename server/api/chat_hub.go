@@ -75,7 +75,9 @@ func (h *ChatHub) HandleClientWS(c *gin.Context) {
 func (h *ChatHub) HandleStaffWS(c *gin.Context) {
 	staffID := c.Query("staffId")
 	token := c.Query("token")
+	log.Printf("[WS] HandleStaffWS called: staffId=%s tokenLen=%d", staffID, len(token))
 	if staffID == "" || token == "" {
+		log.Printf("[WS] HandleStaffWS rejected: missing staffId or token")
 		c.JSON(401, gin.H{"error": "missing staffId or token"})
 		return
 	}
@@ -83,10 +85,12 @@ func (h *ChatHub) HandleStaffWS(c *gin.Context) {
 	// Verify staff exists
 	var staff model.ServiceStaff
 	if err := database.DB.First(&staff, "user_id = ? AND status = 1", staffID).Error; err != nil {
+		log.Printf("[WS] HandleStaffWS rejected: staff %s not found: %v", staffID, err)
 		c.JSON(401, gin.H{"error": "invalid staff"})
 		return
 	}
 
+	log.Printf("[WS] HandleStaffWS: upgrading connection for %s", staffID)
 	h.upgradeAndServe(c, staffID, "staff")
 }
 

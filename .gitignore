@@ -9,6 +9,8 @@ web/h5/dist/
 web/admin/dist/
 bin/
 pc/build/
+pc/build-release/
+*.zip
 server/static/h5/
 server/static/admin/
 

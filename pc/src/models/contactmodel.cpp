@@ -8,15 +8,15 @@ ContactModel::ContactModel(QObject *parent)
 int ContactModel::rowCount(const QModelIndex &parent) const
 {
     Q_UNUSED(parent)
-    return m_contacts.size();
+    return m_filteredIndices.size();
 }
 
 QVariant ContactModel::data(const QModelIndex &index, int role) const
 {
-    if (!index.isValid() || index.row() >= m_contacts.size())
+    if (!index.isValid() || index.row() >= m_filteredIndices.size())
         return {};
 
-    const Contact &c = m_contacts.at(index.row());
+    const Contact &c = m_contacts.at(m_filteredIndices.at(index.row()));
     switch (role) {
     case UserIdRole:      return c.userId;
     case NicknameRole:    return c.nickname;
@@ -55,6 +55,7 @@ void ContactModel::loadFromJson(const QJsonArray &arr)
         c.lastTime = static_cast<qint64>(obj["lastTime"].toDouble(0));
         m_contacts.append(c);
     }
+    rebuildFilter();
     endResetModel();
     emit countChanged();
     emit totalUnreadChanged();
@@ -68,12 +69,24 @@ void ContactModel::addOrUpdate(const QString &userId, const QString &nickname,
         m_contacts[idx].nickname = nickname;
         if (!avatarUrl.isEmpty())
             m_contacts[idx].avatarUrl = avatarUrl;
-        QModelIndex mi = index(idx);
-        emit dataChanged(mi, mi, { NicknameRole, AvatarUrlRole });
+        int fRow = filteredRow(idx);
+        if (fRow >= 0) {
+            QModelIndex mi = index(fRow);
+            emit dataChanged(mi, mi, { NicknameRole, AvatarUrlRole });
+        }
     } else {
-        beginInsertRows(QModelIndex(), m_contacts.size(), m_contacts.size());
+        int realIdx = m_contacts.size();
         m_contacts.append({ userId, nickname, avatarUrl, {}, 0, 0 });
-        endInsertRows();
+        // 检查新联系人是否匹配当前过滤条件
+        bool matches = m_filterText.isEmpty()
+            || nickname.contains(m_filterText, Qt::CaseInsensitive)
+            || userId.contains(m_filterText, Qt::CaseInsensitive);
+        if (matches) {
+            int newFilteredRow = m_filteredIndices.size();
+            beginInsertRows(QModelIndex(), newFilteredRow, newFilteredRow);
+            m_filteredIndices.append(realIdx);
+            endInsertRows();
+        }
         emit countChanged();
     }
 }
@@ -83,8 +96,11 @@ void ContactModel::updateNickname(const QString &userId, const QString &nickname
     int idx = findByUserId(userId);
     if (idx < 0) return;
     m_contacts[idx].nickname = nickname;
-    QModelIndex mi = index(idx);
-    emit dataChanged(mi, mi, { NicknameRole });
+    int fRow = filteredRow(idx);
+    if (fRow >= 0) {
+        QModelIndex mi = index(fRow);
+        emit dataChanged(mi, mi, { NicknameRole });
+    }
 }
 
 void ContactModel::updateAvatar(const QString &userId, const QString &avatarUrl)
@@ -92,8 +108,11 @@ void ContactModel::updateAvatar(const QString &userId, const QString &avatarUrl)
     int idx = findByUserId(userId);
     if (idx < 0) return;
     m_contacts[idx].avatarUrl = avatarUrl;
-    QModelIndex mi = index(idx);
-    emit dataChanged(mi, mi, { AvatarUrlRole });
+    int fRow = filteredRow(idx);
+    if (fRow >= 0) {
+        QModelIndex mi = index(fRow);
+        emit dataChanged(mi, mi, { AvatarUrlRole });
+    }
 }
 
 void ContactModel::updateLastMessage(const QString &userId, const QString &text, qint64 time)
@@ -102,8 +121,11 @@ void ContactModel::updateLastMessage(const QString &userId, const QString &text,
     if (idx < 0) return;
     m_contacts[idx].lastMessage = text;
     m_contacts[idx].lastTime = time;
-    QModelIndex mi = index(idx);
-    emit dataChanged(mi, mi, { LastMessageRole, LastTimeRole });
+    int fRow = filteredRow(idx);
+    if (fRow >= 0) {
+        QModelIndex mi = index(fRow);
+        emit dataChanged(mi, mi, { LastMessageRole, LastTimeRole });
+    }
 }
 
 void ContactModel::incrementUnread(const QString &userId)
@@ -111,8 +133,11 @@ void ContactModel::incrementUnread(const QString &userId)
     int idx = findByUserId(userId);
     if (idx < 0) return;
     m_contacts[idx].unreadCount++;
-    QModelIndex mi = index(idx);
-    emit dataChanged(mi, mi, { UnreadCountRole });
+    int fRow = filteredRow(idx);
+    if (fRow >= 0) {
+        QModelIndex mi = index(fRow);
+        emit dataChanged(mi, mi, { UnreadCountRole });
+    }
     emit totalUnreadChanged();
 }
 
@@ -121,8 +146,11 @@ void ContactModel::clearUnread(const QString &userId)
     int idx = findByUserId(userId);
     if (idx < 0) return;
     m_contacts[idx].unreadCount = 0;
-    QModelIndex mi = index(idx);
-    emit dataChanged(mi, mi, { UnreadCountRole });
+    int fRow = filteredRow(idx);
+    if (fRow >= 0) {
+        QModelIndex mi = index(fRow);
+        emit dataChanged(mi, mi, { UnreadCountRole });
+    }
     emit totalUnreadChanged();
 }
 
@@ -130,6 +158,7 @@ void ContactModel::clear()
 {
     beginResetModel();
     m_contacts.clear();
+    m_filteredIndices.clear();
     endResetModel();
     emit countChanged();
     emit totalUnreadChanged();
@@ -178,4 +207,34 @@ int ContactModel::findByUserId(const QString &userId) const
             return i;
     }
     return -1;
+}
+
+void ContactModel::setFilterText(const QString &text)
+{
+    if (m_filterText == text)
+        return;
+    m_filterText = text;
+    emit filterTextChanged();
+
+    beginResetModel();
+    rebuildFilter();
+    endResetModel();
+    emit countChanged();
+}
+
+void ContactModel::rebuildFilter()
+{
+    m_filteredIndices.clear();
+    for (int i = 0; i < m_contacts.size(); ++i) {
+        if (m_filterText.isEmpty()
+            || m_contacts[i].nickname.contains(m_filterText, Qt::CaseInsensitive)
+            || m_contacts[i].userId.contains(m_filterText, Qt::CaseInsensitive)) {
+            m_filteredIndices.append(i);
+        }
+    }
+}
+
+int ContactModel::filteredRow(int realIdx) const
+{
+    return m_filteredIndices.indexOf(realIdx);
 }

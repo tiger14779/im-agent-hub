@@ -31,6 +31,7 @@ class ContactModel : public QAbstractListModel
     QML_ELEMENT
     Q_PROPERTY(int count READ count NOTIFY countChanged)         // 联系人数量
     Q_PROPERTY(int totalUnread READ totalUnread NOTIFY totalUnreadChanged)  // 总未读数
+    Q_PROPERTY(QString filterText READ filterText WRITE setFilterText NOTIFY filterTextChanged)  // 搜索过滤文本
 
 public:
     // QML 可访问的角色枚举
@@ -49,8 +50,11 @@ public:
     QVariant data(const QModelIndex &index, int role) const override;
     QHash<int, QByteArray> roleNames() const override;
 
-    int count() const { return m_contacts.size(); }
+    int count() const { return m_filteredIndices.size(); }
     int totalUnread() const;
+
+    QString filterText() const { return m_filterText; }
+    void setFilterText(const QString &text);
 
     // 从服务器返回的 JSON 数组加载联系人列表（会清空现有数据）
     Q_INVOKABLE void loadFromJson(const QJsonArray &arr);
@@ -81,11 +85,19 @@ public:
 signals:
     void countChanged();
     void totalUnreadChanged();
+    void filterTextChanged();
 
 private:
     // 根据 userId 查找联系人在列表中的索引，未找到返回 -1
     int findByUserId(const QString &userId) const;
-    QVector<Contact> m_contacts;  // 联系人列表
+    // 重建过滤索引列表
+    void rebuildFilter();
+    // 将真实索引映射为过滤后的行号，不可见返回 -1
+    int filteredRow(int realIdx) const;
+
+    QVector<Contact> m_contacts;         // 联系人列表（完整）
+    QVector<int> m_filteredIndices;      // 过滤后的索引映射
+    QString m_filterText;                // 当前搜索关键词
 };
 
 #endif // CONTACTMODEL_H

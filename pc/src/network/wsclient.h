@@ -59,18 +59,22 @@ private slots:
     void onTextMessageReceived(const QString &message);  // 收到文本消息
     void onError(QAbstractSocket::SocketError error);    // WS 错误
     void tryReconnect();                                // 尝试重新连接
+    void sendPing();                                    // 发送心跳 ping
 
 private:
     // 解析服务器下发的 WS 消息信封（分发到对应信号）
     void handleWsMessage(const QJsonObject &envelope);
+    // 内部发起 WS 连接（构造 URL 并 open）
+    void doConnect();
 
     QWebSocket m_ws;               // WebSocket 实例
-    QTimer m_reconnectTimer;       // 重连定时器（断线后3秒尝试重连）
+    QTimer m_reconnectTimer;       // 重连定时器（断线后指数退避重连）
+    QTimer m_pingTimer;            // 心跳定时器（每25秒发送 ping）
     QString m_baseUrl;             // 服务器基础地址，清空表示不再重连
     QString m_staffId;             // 客服人员ID
     QString m_token;               // 认证令牌
     bool m_connected = false;      // 当前连接状态
-    int m_reconnectAttempts = 0;   // 已重连次数（最多10次）
+    int m_reconnectAttempts = 0;   // 已重连次数（用于指数退避计算）
 };
 
 #endif // WSCLIENT_H

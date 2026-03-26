@@ -5,22 +5,44 @@
 #include <QDebug>
 #include <QDir>
 #include <QLibraryInfo>
+#include <QFile>
+#include <QDateTime>
+#include <QMutex>
 
-/**
- * @brief 程序入口
- *
- * 初始化顺序：
- *   1. 创建 QGuiApplication 并设置应用信息
- *   2. 设置 QML 样式为 "Basic"
- *   3. 创建 QML 引擎并加载主窗口模块
- *   4. 进入事件循环
- */
+// 全局日志文件，将 qDebug 输出重定向到文件
+static QFile *g_logFile = nullptr;
+static QMutex g_logMutex;
+
+void fileMessageHandler(QtMsgType type, const QMessageLogContext &ctx, const QString &msg)
+{
+    Q_UNUSED(ctx)
+    QMutexLocker locker(&g_logMutex);
+    if (!g_logFile || !g_logFile->isOpen())
+        return;
+    const char *level = "DEBUG";
+    switch (type) {
+    case QtWarningMsg:  level = "WARN";  break;
+    case QtCriticalMsg: level = "CRIT";  break;
+    case QtFatalMsg:    level = "FATAL"; break;
+    default: break;
+    }
+    QString line = QStringLiteral("%1 [%2] %3\n")
+                       .arg(QDateTime::currentDateTime().toString("hh:mm:ss.zzz"), level, msg);
+    g_logFile->write(line.toUtf8());
+    g_logFile->flush();
+}
+
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
     app.setApplicationName("IM Agent Hub");
     app.setOrganizationName("ImAgentHub");
     app.setApplicationVersion("1.0.0");
+
+    // 将 qDebug 输出重定向到与 exe 同目录的日志文件
+    g_logFile = new QFile(QCoreApplication::applicationDirPath() + "/pc_debug.log");
+    g_logFile->open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text);
+    qInstallMessageHandler(fileMessageHandler);
 
     qDebug() << "启动 IM Agent Hub PC 客户端...";
 
