@@ -607,13 +607,16 @@ Page {
         // 文件上传成功回调 —— 根据上下文判断是普通发送还是桥接器发送
         function onUploadSuccess(url, origName, origSize) {
             console.log("[上传] 成功 url=" + url + " origName=" + origName + " origSize=" + origSize)
-            // 检查是否是 WxBridge API 触发的上传
-            var bridgeTarget = chatRoot._pendingBridgeTarget
-            var bridgeType   = chatRoot._pendingBridgeType
-            console.log("[上传] bridgeTarget=" + bridgeTarget + " bridgeType=" + bridgeType)
-            if (bridgeTarget.length > 0) {
-                chatRoot._pendingBridgeTarget = ""
-                chatRoot._pendingBridgeType = ""
+            // 检查是否有桥接器待处理的上传（FIFO 队列）
+            if (chatRoot._pendingBridgeQueue.length > 0) {
+                var q = chatRoot._pendingBridgeQueue
+                var entry = q.shift()
+                chatRoot._pendingBridgeQueue = q
+
+                var bridgeTarget = entry.target
+                var bridgeType = entry.type
+                console.log("[上传] 桥接器出队: target=" + bridgeTarget + " type=" + bridgeType
+                            + " 剩余队列=" + q.length)
 
                 // 根据桥接器指定的类型发送：
                 //   "image" (Q0011) → 始终作为图片发送 (contentType=102)
@@ -852,17 +855,19 @@ Page {
         // 财务软件指令：发送图片
         function onApiSendImage(wxid, path) {
             console.log("[桥接器] 发送图片到", wxid, ":", path)
-            // 先上传图片文件，上传成功后通过 WS 发送
-            chatRoot._pendingBridgeTarget = wxid
-            chatRoot._pendingBridgeType = "image"
+            // 入队后上传，上传完成后从队列取出目标
+            var q = chatRoot._pendingBridgeQueue
+            q.push({target: wxid, type: "image"})
+            chatRoot._pendingBridgeQueue = q
             HttpClient.uploadFile(path)
         }
 
         // 财务软件指令：发送文件
         function onApiSendFile(wxid, path) {
             console.log("[桥接器] 发送文件到", wxid, ":", path)
-            chatRoot._pendingBridgeTarget = wxid
-            chatRoot._pendingBridgeType = "file"
+            var q = chatRoot._pendingBridgeQueue
+            q.push({target: wxid, type: "file"})
+            chatRoot._pendingBridgeQueue = q
             HttpClient.uploadFile(path)
         }
 
@@ -877,7 +882,6 @@ Page {
         }
     }
 
-    // 桥接器待处理上传状态（记录财务软件触发的上传目标）
-    property string _pendingBridgeTarget: ""
-    property string _pendingBridgeType: ""
+    // 桥接器待处理上传队列（FIFO，每个上传对应一个条目）
+    property var _pendingBridgeQueue: []
 }
