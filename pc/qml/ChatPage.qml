@@ -145,24 +145,70 @@ Page {
                     Layout.alignment: Qt.AlignHCenter
                     Layout.bottomMargin: 12
                     width: 40; height: 40; radius: 6
-                    color: notifySoundEnabled ? "transparent" : "#444"
-                    Label {
+                    color: soundBtnHovered ? "#444" : "transparent"
+                    property bool soundBtnHovered: false
+
+                    // 自绘扬声器图标
+                    Canvas {
                         anchors.centerIn: parent
-                        text: notifySoundEnabled ? "\uD83D\uDD14" : "\uD83D\uDD15"   // 🔔 / 🔕
-                        font.pixelSize: 20
+                        width: 22; height: 22
+                        onPaint: {
+                            var ctx = getContext("2d")
+                            ctx.clearRect(0, 0, width, height)
+                            ctx.strokeStyle = notifySoundEnabled ? "#07c160" : "#888"
+                            ctx.fillStyle = notifySoundEnabled ? "#07c160" : "#888"
+                            ctx.lineWidth = 1.5
+                            ctx.lineCap = "round"
+
+                            // 喇叭主体
+                            ctx.beginPath()
+                            ctx.moveTo(3, 8)
+                            ctx.lineTo(7, 8)
+                            ctx.lineTo(12, 4)
+                            ctx.lineTo(12, 18)
+                            ctx.lineTo(7, 14)
+                            ctx.lineTo(3, 14)
+                            ctx.closePath()
+                            ctx.fill()
+
+                            if (notifySoundEnabled) {
+                                // 声波弧线
+                                ctx.beginPath()
+                                ctx.arc(12, 11, 4, -0.7, 0.7)
+                                ctx.stroke()
+                                ctx.beginPath()
+                                ctx.arc(12, 11, 7.5, -0.6, 0.6)
+                                ctx.stroke()
+                            } else {
+                                // 静音斜线
+                                ctx.strokeStyle = "#ff4d4f"
+                                ctx.lineWidth = 2
+                                ctx.beginPath()
+                                ctx.moveTo(15, 5)
+                                ctx.lineTo(5, 17)
+                                ctx.stroke()
+                            }
+                        }
+                        // 状态变化时重绘
+                        Connections {
+                            target: chatRoot
+                            function onNotifySoundEnabledChanged() { parent.requestPaint() }
+                        }
                     }
+
                     MouseArea {
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
+                        hoverEnabled: true
+                        onEntered: parent.soundBtnHovered = true
+                        onExited: parent.soundBtnHovered = false
                         onClicked: {
                             notifySoundEnabled = !notifySoundEnabled
                             HttpClient.setSetting("notify/soundEnabled", notifySoundEnabled ? "true" : "false")
                         }
                     }
-                    ToolTip.visible: hovered
+                    ToolTip.visible: soundBtnHovered
                     ToolTip.text: notifySoundEnabled ? "提示音: 开" : "提示音: 关"
-                    property bool hovered: false
-                    HoverHandler { onHoveredChanged: parent.hovered = hovered }
                 }
             }
         }
