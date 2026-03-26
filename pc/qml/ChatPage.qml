@@ -15,7 +15,7 @@ Page {
     property string activeChatName: ""  // 当前会话用户昵称
 
     // 分页状态
-    property real oldestSeq: 0          // 当前最旧消息的 seq（用于向上加载更多）
+    property int oldestSeq: 0            // 当前最旧消息的 seq（用于向上加载更多）
     property bool hasMoreHistory: true  // 是否还有更多历史消息
     property bool loadingMore: false    // 是否正在加载更多
 

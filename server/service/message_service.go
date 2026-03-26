@@ -13,6 +13,7 @@ import (
 	"im-agent-hub/model"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // MessageService handles message persistence and retrieval.
@@ -79,11 +80,16 @@ func (s *MessageService) SaveMessage(sendID, recvID string, contentType int, con
 	}
 
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
-		// Ensure conversation exists and get next seq
+		// Ensure conversation exists
 		userA, userB := sortedPair(sendID, recvID)
 		conv := model.Conversation{ID: convID, UserA: userA, UserB: userB}
 		if err := tx.FirstOrCreate(&conv, "id = ?", convID).Error; err != nil {
 			return fmt.Errorf("ensure conversation: %w", err)
+		}
+
+		// Lock the conversation row (FOR UPDATE) to prevent concurrent seq conflicts
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&conv, "id = ?", convID).Error; err != nil {
+			return fmt.Errorf("lock conversation: %w", err)
 		}
 
 		nextSeq := conv.LastSeq + 1

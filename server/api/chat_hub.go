@@ -40,12 +40,13 @@ type msgTask struct {
 }
 
 // ChatConn represents a single WebSocket connection.
+// Each connection has a dedicated write channel + goroutine for serialized writes.
 type ChatConn struct {
 	conn   *websocket.Conn
 	userID string
 	role   string // "client" or "staff"
 	stopCh chan struct{}
-	mu     sync.Mutex // protects conn writes
+	sendCh chan []byte // buffered outgoing message channel
 }
 
 // NewChatHub creates a new ChatHub.
@@ -140,6 +141,7 @@ func (h *ChatHub) upgradeAndServe(c *gin.Context, userID, role string) {
 		userID: userID,
 		role:   role,
 		stopCh: make(chan struct{}),
+		sendCh: make(chan []byte, 128), // buffered: avoids blocking senders
 	}
 
 	// Replace existing connection for this user
@@ -153,8 +155,8 @@ func (h *ChatHub) upgradeAndServe(c *gin.Context, userID, role string) {
 
 	log.Printf("[WS] %s (%s) connected", userID, role)
 
-	// Server-side ping goroutine keeps the connection alive
-	go h.pingLoop(cc)
+	// Dedicated write goroutine: serialized writes + ping keepalive
+	go h.writeLoop(cc)
 
 	// Read loop
 	h.readLoop(cc)
@@ -327,29 +329,41 @@ func (h *ChatHub) handleMarkRead(cc *ChatConn, data json.RawMessage) {
 	_ = h.msgSvc.MarkRead(convID, cc.userID)
 }
 
-// sendJSON sends a JSON message to a client, protected by mutex.
+// sendJSON marshals v to JSON and queues it on the connection's write channel.
+// Non-blocking: if the channel is full, the message is dropped (logged).
 func (h *ChatHub) sendJSON(cc *ChatConn, v interface{}) {
-	cc.mu.Lock()
-	defer cc.mu.Unlock()
-	cc.conn.SetWriteDeadline(time.Now().Add(writeWait))
-	if err := cc.conn.WriteJSON(v); err != nil {
-		log.Printf("[WS] write error to %s: %v", cc.userID, err)
+	data, err := json.Marshal(v)
+	if err != nil {
+		log.Printf("[WS] marshal error for %s: %v", cc.userID, err)
+		return
+	}
+	select {
+	case cc.sendCh <- data:
+	default:
+		log.Printf("[WS] send channel full, dropping message for %s", cc.userID)
 	}
 }
 
-// pingLoop sends WebSocket-level Ping frames so intermediate proxies /
-// the OS don't consider the connection idle and close it.
-func (h *ChatHub) pingLoop(cc *ChatConn) {
+// writeLoop is the single goroutine that writes to the WebSocket.
+// It handles both queued JSON messages and periodic ping keepalives.
+// This eliminates concurrent write contention entirely.
+func (h *ChatHub) writeLoop(cc *ChatConn) {
 	ticker := time.NewTicker(pingPeriod)
 	defer ticker.Stop()
 	for {
 		select {
-		case <-ticker.C:
-			cc.mu.Lock()
+		case msg, ok := <-cc.sendCh:
+			if !ok {
+				return // channel closed
+			}
 			cc.conn.SetWriteDeadline(time.Now().Add(writeWait))
-			err := cc.conn.WriteMessage(websocket.PingMessage, nil)
-			cc.mu.Unlock()
-			if err != nil {
+			if err := cc.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+				log.Printf("[WS] write error to %s: %v", cc.userID, err)
+				return
+			}
+		case <-ticker.C:
+			cc.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := cc.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
 		case <-cc.stopCh:

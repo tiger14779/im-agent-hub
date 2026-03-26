@@ -61,6 +61,13 @@ QHash<int, QByteArray> ChatModel::roleNames() const
 void ChatModel::appendMessage(const QJsonObject &msg)
 {
     ChatMessage m = fromJson(msg);
+    // Dedup: skip if clientMsgID already exists
+    if (!m.clientMsgID.isEmpty()) {
+        for (const auto &existing : m_messages) {
+            if (existing.clientMsgID == m.clientMsgID)
+                return;
+        }
+    }
     beginInsertRows(QModelIndex(), m_messages.size(), m_messages.size());
     m_messages.append(m);
     endInsertRows();
