@@ -66,7 +66,16 @@ ListView {
     }
 
     onContentYChanged: {
-        // 仅处理加载更多逻辑，不在此更新 _userScrolledUp
+        // 单向重置：到达底部时重置为 false（覆盖鼠标滚轮回到底部的场景）
+        // 注意：永远不在此处设为 true，避免内容高度增长时的布局调整被误判为用户上滚
+        if (contentHeight > height) {
+            var atBottom = (contentY + height + 120) >= contentHeight
+            if (atBottom) _userScrolledUp = false
+        } else {
+            _userScrolledUp = false
+        }
+
+        // 滚动到顶部附近时触发加载更多
         if (contentY < 50 && hasMore && !loadingMore && count > 0) {
             _prevContentHeight = contentHeight
             requestLoadMore()
