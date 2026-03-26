@@ -24,17 +24,33 @@ ListView {
     property real _prevContentHeight: 0
     // 上次 count，用于区分 prepend（头部加载）和 append（新消息）
     property int _prevCount: 0
+    // 需要滚到底部的标志（跨越 clear→append 两步操作）
+    property bool _needScrollToEnd: false
 
-    // 一次性延迟定时器：仅在 positionViewAtEnd 后补偿 delegate 异步渲染
-    // 替代 onContentHeightChanged，避免无限循环
+    // 补偿定时器：delegate 异步渲染后多次确认滚到底部
+    // 最多重试6次（共 ~500ms），到底后立即停止
     Timer {
         id: _scrollFixTimer
         interval: 80
-        repeat: false
+        repeat: true
+        property int _retries: 0
         onTriggered: {
-            if (!_userScrolledUp && !suppressAutoScroll) {
-                msgList.positionViewAtEnd()
+            _retries++
+            if (_retries > 6 || _userScrolledUp || suppressAutoScroll) {
+                stop()
+                return
             }
+            msgList.positionViewAtEnd()
+            // 已到底则停止
+            if (contentHeight > 0 && contentHeight <= height + 10) {
+                stop()
+            } else if (contentHeight > height && (contentY + height + 5) >= contentHeight) {
+                stop()
+            }
+        }
+        function begin() {
+            _retries = 0
+            restart()
         }
     }
 
@@ -43,12 +59,17 @@ ListView {
         _prevCount = count
 
         if (added <= 0) {
-            // clear() 或 model reset —— 重置所有滚动状态
+            // clear() 或 model reset —— 重置所有滚动状态，标记需要滚底
             _prevContentHeight = 0
             _userScrolledUp = false
+            _needScrollToEnd = true
+        } else if (_needScrollToEnd) {
+            // clear 后紧接而来的 append/prepend —— 初次加载，滚到底部
+            _needScrollToEnd = false
+            _prevContentHeight = 0
             Qt.callLater(function() {
                 msgList.positionViewAtEnd()
-                _scrollFixTimer.restart()
+                _scrollFixTimer.begin()
             })
         } else if (_prevContentHeight > 0) {
             // 在头部插入旧消息后，恢复滚动位置
@@ -62,7 +83,7 @@ ListView {
             if (!_userScrolledUp && !suppressAutoScroll) {
                 Qt.callLater(function() {
                     msgList.positionViewAtEnd()
-                    _scrollFixTimer.restart()
+                    _scrollFixTimer.begin()
                 })
             }
         }
