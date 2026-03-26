@@ -59,6 +59,9 @@ class ChatWsService {
   private connected = false
   private intentionalClose = false
   private reconnectAttempts = 0
+  private lastServerTime = 0 // timestamp of last message received from server
+  private static readonly PING_INTERVAL = 10000 // 10s
+  private static readonly STALE_THRESHOLD = 25000 // 25s no response → stale
 
   /** Pending sends: clientMsgId → full payload + retry state */
   private pendingSends = new Map<string, {
@@ -106,12 +109,14 @@ class ChatWsService {
     this.ws.onopen = () => {
       this.connected = true
       this.reconnectAttempts = 0
+      this.lastServerTime = Date.now()
       this.onConnected()
       this.startPing()
       this.flushPendingSends()
     }
 
     this.ws.onmessage = (ev) => {
+      this.lastServerTime = Date.now()
       try {
         const env: Envelope = JSON.parse(ev.data)
         this.handleMessage(env)
@@ -228,13 +233,19 @@ class ChatWsService {
     if (entry.timer) clearTimeout(entry.timer)
     entry.timer = setTimeout(() => {
       entry.timer = null
-      // Only fail if still connected (true timeout). If disconnected, will be retried.
-      if (this.connected) {
-        this.pendingSends.delete(clientMsgId)
-        console.warn('[WS] ACK timeout for', clientMsgId)
-        this.onAck({ clientMsgId, status: 3, error: '发送超时，请重试' })
-      }
+      if (!this.connected) return // disconnected — will be retried on reconnect
+      // ACK timeout while "connected" → connection is likely stale
+      // Force close to trigger reconnect; message stays in pendingSends for retry
+      console.warn('[WS] ACK timeout for', clientMsgId, '— forcing reconnect')
+      this.forceClose()
     }, ChatWsService.ACK_TIMEOUT)
+  }
+
+  /** Force-close a stale connection to trigger reconnect */
+  private forceClose() {
+    if (this.ws) {
+      this.ws.close()
+    }
   }
 
   /** Remove a message from pending (ACK received) */
@@ -372,8 +383,15 @@ class ChatWsService {
   private startPing() {
     this.stopPing()
     this.pingTimer = setInterval(() => {
+      // Check for stale connection: no server message for too long
+      if (this.lastServerTime > 0 && Date.now() - this.lastServerTime > ChatWsService.STALE_THRESHOLD) {
+        console.warn('[WS] stale connection detected (no server response for',
+          Math.round((Date.now() - this.lastServerTime) / 1000), 's), forcing reconnect')
+        this.forceClose()
+        return
+      }
       this.send('ping', {})
-    }, 25000)
+    }, ChatWsService.PING_INTERVAL)
   }
 
   private stopPing() {
