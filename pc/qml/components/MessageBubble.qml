@@ -20,6 +20,8 @@ Item {
     property int msgStatus: 2          // 发送状态: 1=发送中, 2=已发送, 3=失败
     property real sendTime: 0          // 发送时间戳
 
+    signal imageLoaded()               // 图片加载完成信号（用于通知列表补偿滚动）
+
     RowLayout {
         id: bubbleRow
         anchors {
@@ -169,6 +171,11 @@ Item {
                         height: sourceSize.width > 0
                                 ? width / (sourceSize.width / sourceSize.height)
                                 : 120
+
+                        onStatusChanged: {
+                            if (status === Image.Ready)
+                                bubble.imageLoaded()
+                        }
 
                         // 加载中指示器
                         BusyIndicator {

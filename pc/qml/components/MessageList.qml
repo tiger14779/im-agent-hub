@@ -152,6 +152,11 @@ ListView {
         voiceDuration: model.voiceDuration
         msgStatus: model.status
         sendTime: model.sendTime
+
+        onImageLoaded: {
+            if (!msgList._userScrolledUp && !msgList.suppressAutoScroll)
+                _scrollFixTimer.begin()
+        }
     }
 
     ScrollBar.vertical: ScrollBar {
