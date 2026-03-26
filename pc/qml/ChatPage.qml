@@ -393,12 +393,14 @@ Page {
 
                 // 消息列表
                 MessageList {
+                    id: messageListView
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     model: chatModel
                     selfId: staffUserId
                     loadingMore: chatRoot.loadingMore
                     hasMore: chatRoot.hasMoreHistory
+                    suppressAutoScroll: chatRoot._mergeMode
                     onRequestLoadMore: chatRoot.loadMoreHistory()
                 }
 
@@ -756,6 +758,12 @@ Page {
                     contactModel.updateLastMessage(bridgeTarget, "[\u6587\u4EF6]", Date.now())
                     WxBridge.pushMessageEvent(staffUserId, bridgeTarget, "[\u6587\u4EF6]", true, 49)
                 }
+                // 串行队列：处理完当前条目后，启动下一个上传
+                if (chatRoot._pendingBridgeQueue.length > 0) {
+                    var nextPath = chatRoot._pendingBridgeQueue[0].path
+                    console.log("[上传] 启动下一个桥接器上传: " + nextPath)
+                    HttpClient.uploadFile(nextPath)
+                }
                 return
             }
 
@@ -782,6 +790,21 @@ Page {
                 var fileMsgId = chatModel.addPendingMessage(activeChatId, 105, "", "", origName, origSize)
                 WsClient.sendMessage(activeChatId, 105, fileContent, fileMsgId)
                 contactModel.updateLastMessage(activeChatId, "[\u6587\u4EF6]", Date.now())
+            }
+        }
+
+        // 文件上传失败 —— 跳过当前桥接器条目，继续处理队列
+        function onUploadFailed(error) {
+            console.warn("[上传] 失败:", error)
+            if (chatRoot._pendingBridgeQueue.length > 0) {
+                var q = chatRoot._pendingBridgeQueue
+                var skipped = q.shift()
+                chatRoot._pendingBridgeQueue = q
+                console.warn("[上传] 跳过桥接器条目: target=" + skipped.target + " path=" + skipped.path)
+                // 继续处理队列中的下一个
+                if (q.length > 0) {
+                    HttpClient.uploadFile(q[0].path)
+                }
             }
         }
     }
@@ -939,13 +962,14 @@ Page {
 
             if (_mergeMode) {
                 // 合并模式（重连/定时同步）：仅追加新消息，appendMessage 内置去重
-                _mergeMode = false
+                // _mergeMode 保持 true 直到操作完成，suppressAutoScroll 绑定此值
                 var mergedCount = 0
                 var beforeCount = chatModel.count
                 for (var j = 0; j < parsed.length; j++) {
                     chatModel.appendMessage(parsed[j])
                 }
                 mergedCount = chatModel.count - beforeCount
+                _mergeMode = false  // 所有追加完成后才重置
                 if (mergedCount > 0) {
                     console.log("[ChatPage] sync merged", mergedCount, "new messages")
                 }
@@ -998,20 +1022,24 @@ Page {
         // 财务软件指令：发送图片
         function onApiSendImage(wxid, path) {
             console.log("[桥接器] 发送图片到", wxid, ":", path)
-            // 入队后上传，上传完成后从队列取出目标
+            // 入队后上传，串行处理：队列中只有一个时立即上传，否则等待前面完成
             var q = chatRoot._pendingBridgeQueue
-            q.push({target: wxid, type: "image"})
+            q.push({target: wxid, type: "image", path: path})
             chatRoot._pendingBridgeQueue = q
-            HttpClient.uploadFile(path)
+            if (q.length === 1) {
+                HttpClient.uploadFile(path)
+            }
         }
 
         // 财务软件指令：发送文件
         function onApiSendFile(wxid, path) {
             console.log("[桥接器] 发送文件到", wxid, ":", path)
             var q = chatRoot._pendingBridgeQueue
-            q.push({target: wxid, type: "file"})
+            q.push({target: wxid, type: "file", path: path})
             chatRoot._pendingBridgeQueue = q
-            HttpClient.uploadFile(path)
+            if (q.length === 1) {
+                HttpClient.uploadFile(path)
+            }
         }
 
         // 财务软件指令：获取好友列表

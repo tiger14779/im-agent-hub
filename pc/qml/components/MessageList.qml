@@ -15,6 +15,9 @@ ListView {
 
     signal requestLoadMore()            // 向上滚动到顶部时触发
 
+    // 抑制自动滚动（合并同步期间设为 true，避免干扰用户浏览）
+    property bool suppressAutoScroll: false
+
     // 记录是否用户主动向上滚动（用来决定新消息是否自动滚到底部）
     property bool _userScrolledUp: false
     // 加载更多前记录的 contentHeight，用于恢复滚动位置
@@ -39,8 +42,8 @@ ListView {
                 _prevContentHeight = 0
             })
         } else {
-            // 新消息追加到尾部：除非用户明确上滚过，否则自动滚到底部
-            if (!_userScrolledUp) {
+            // 新消息追加到尾部：除非用户明确上滚过或合并同步中，否则自动滚到底部
+            if (!_userScrolledUp && !suppressAutoScroll) {
                 Qt.callLater(function() { msgList.positionViewAtEnd() })
             }
         }
@@ -49,7 +52,7 @@ ListView {
     // 内容高度变化时：delegate 延迟渲染可能导致 positionViewAtEnd 后高度再次增长，
     // 此时需要二次滚到底部
     onContentHeightChanged: {
-        if (_prevContentHeight === 0 && !_userScrolledUp && contentHeight > height) {
+        if (_prevContentHeight === 0 && !_userScrolledUp && !suppressAutoScroll && contentHeight > height) {
             Qt.callLater(function() { msgList.positionViewAtEnd() })
         }
     }
