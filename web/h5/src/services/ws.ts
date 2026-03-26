@@ -59,6 +59,10 @@ class ChatWsService {
   private connected = false
   private intentionalClose = false
 
+  /** Pending ACKs: clientMsgId → timeout handle */
+  private pendingAcks = new Map<string, ReturnType<typeof setTimeout>>()
+  private static readonly ACK_TIMEOUT = 15000 // 15 seconds
+
   // Callbacks
   onNewMessage: (msg: Message) => void = () => {}
   onAck: (ack: AckData) => void = () => {}
@@ -111,6 +115,7 @@ class ChatWsService {
     this.ws.onclose = () => {
       this.connected = false
       this.stopPing()
+      this.failAllPendingAcks()
       this.onDisconnected()
       if (!this.intentionalClose) {
         this.scheduleReconnect()
@@ -130,7 +135,9 @@ class ChatWsService {
         break
       }
       case 'message_ack': {
-        this.onAck(env.data as AckData)
+        const ack = env.data as AckData
+        this.clearPendingAck(ack.clientMsgId)
+        this.onAck(ack)
         break
       }
       case 'history': {
@@ -188,6 +195,34 @@ class ChatWsService {
     }
   }
 
+  /** Track a sent message and fire a fail-ACK if no response within timeout */
+  private trackPendingAck(clientMsgId: string) {
+    this.clearPendingAck(clientMsgId)
+    const timer = setTimeout(() => {
+      this.pendingAcks.delete(clientMsgId)
+      console.warn('[WS] ACK timeout for', clientMsgId)
+      this.onAck({ clientMsgId, status: 3, error: '发送超时，请重试' })
+    }, ChatWsService.ACK_TIMEOUT)
+    this.pendingAcks.set(clientMsgId, timer)
+  }
+
+  private clearPendingAck(clientMsgId: string) {
+    const timer = this.pendingAcks.get(clientMsgId)
+    if (timer) {
+      clearTimeout(timer)
+      this.pendingAcks.delete(clientMsgId)
+    }
+  }
+
+  /** Fail all pending ACKs (called on disconnect) */
+  private failAllPendingAcks() {
+    for (const [id, timer] of this.pendingAcks) {
+      clearTimeout(timer)
+      this.onAck({ clientMsgId: id, status: 3, error: '连接断开，请重试' })
+    }
+    this.pendingAcks.clear()
+  }
+
   // ── Public API ─────────────────────────────────────────────
 
   sendTextMessage(recvId: string, text: string): string {
@@ -198,6 +233,7 @@ class ChatWsService {
       content: JSON.stringify({ text }),
       clientMsgId
     })
+    this.trackPendingAck(clientMsgId)
     return clientMsgId
   }
 
@@ -210,6 +246,7 @@ class ChatWsService {
       content: JSON.stringify({ url, name: file.name, size: file.size, type: file.type }),
       clientMsgId
     })
+    this.trackPendingAck(clientMsgId)
     return clientMsgId
   }
 
@@ -222,6 +259,7 @@ class ChatWsService {
       content: JSON.stringify({ url, duration, size: blob.size }),
       clientMsgId
     })
+    this.trackPendingAck(clientMsgId)
     return clientMsgId
   }
 
@@ -234,6 +272,7 @@ class ChatWsService {
       content: JSON.stringify({ url, name: file.name, size: file.size, type: file.type }),
       clientMsgId
     })
+    this.trackPendingAck(clientMsgId)
     return clientMsgId
   }
 

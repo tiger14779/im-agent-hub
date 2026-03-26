@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"im-agent-hub/database"
 	"im-agent-hub/model"
@@ -17,6 +18,12 @@ import (
 var wsUpgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
+
+const (
+	writeWait  = 10 * time.Second // max time to write a message
+	pongWait   = 60 * time.Second // max time between pongs from client
+	pingPeriod = 50 * time.Second // must be < pongWait
+)
 
 // ChatHub manages all WebSocket connections and message routing.
 type ChatHub struct {
@@ -101,6 +108,13 @@ func (h *ChatHub) upgradeAndServe(c *gin.Context, userID, role string) {
 		return
 	}
 
+	// Set read deadline; pong handler resets it.
+	conn.SetReadDeadline(time.Now().Add(pongWait))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
+
 	cc := &ChatConn{
 		conn:   conn,
 		userID: userID,
@@ -118,6 +132,9 @@ func (h *ChatHub) upgradeAndServe(c *gin.Context, userID, role string) {
 	h.mu.Unlock()
 
 	log.Printf("[WS] %s (%s) connected", userID, role)
+
+	// Server-side ping goroutine keeps the connection alive
+	go h.pingLoop(cc)
 
 	// Read loop
 	h.readLoop(cc)
@@ -158,6 +175,7 @@ func (h *ChatHub) readLoop(cc *ChatConn) {
 		case "mark_read":
 			h.handleMarkRead(cc, env.Data)
 		case "ping":
+			cc.conn.SetReadDeadline(time.Now().Add(pongWait))
 			h.sendJSON(cc, map[string]interface{}{"type": "pong"})
 		}
 	}
@@ -289,8 +307,30 @@ func (h *ChatHub) handleMarkRead(cc *ChatConn, data json.RawMessage) {
 func (h *ChatHub) sendJSON(cc *ChatConn, v interface{}) {
 	cc.mu.Lock()
 	defer cc.mu.Unlock()
+	cc.conn.SetWriteDeadline(time.Now().Add(writeWait))
 	if err := cc.conn.WriteJSON(v); err != nil {
 		log.Printf("[WS] write error to %s: %v", cc.userID, err)
+	}
+}
+
+// pingLoop sends WebSocket-level Ping frames so intermediate proxies /
+// the OS don't consider the connection idle and close it.
+func (h *ChatHub) pingLoop(cc *ChatConn) {
+	ticker := time.NewTicker(pingPeriod)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			cc.mu.Lock()
+			cc.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			err := cc.conn.WriteMessage(websocket.PingMessage, nil)
+			cc.mu.Unlock()
+			if err != nil {
+				return
+			}
+		case <-cc.stopCh:
+			return
+		}
 	}
 }
 
