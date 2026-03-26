@@ -25,6 +25,19 @@ ListView {
     // 上次 count，用于区分 prepend（头部加载）和 append（新消息）
     property int _prevCount: 0
 
+    // 一次性延迟定时器：仅在 positionViewAtEnd 后补偿 delegate 异步渲染
+    // 替代 onContentHeightChanged，避免无限循环
+    Timer {
+        id: _scrollFixTimer
+        interval: 80
+        repeat: false
+        onTriggered: {
+            if (!_userScrolledUp && !suppressAutoScroll) {
+                msgList.positionViewAtEnd()
+            }
+        }
+    }
+
     onCountChanged: {
         var added = count - _prevCount
         _prevCount = count
@@ -33,7 +46,10 @@ ListView {
             // clear() 或 model reset —— 重置所有滚动状态
             _prevContentHeight = 0
             _userScrolledUp = false
-            Qt.callLater(function() { msgList.positionViewAtEnd() })
+            Qt.callLater(function() {
+                msgList.positionViewAtEnd()
+                _scrollFixTimer.restart()
+            })
         } else if (_prevContentHeight > 0) {
             // 在头部插入旧消息后，恢复滚动位置
             Qt.callLater(function() {
@@ -44,16 +60,11 @@ ListView {
         } else {
             // 新消息追加到尾部：除非用户明确上滚过或合并同步中，否则自动滚到底部
             if (!_userScrolledUp && !suppressAutoScroll) {
-                Qt.callLater(function() { msgList.positionViewAtEnd() })
+                Qt.callLater(function() {
+                    msgList.positionViewAtEnd()
+                    _scrollFixTimer.restart()
+                })
             }
-        }
-    }
-
-    // 内容高度变化时：delegate 延迟渲染可能导致 positionViewAtEnd 后高度再次增长，
-    // 此时需要二次滚到底部
-    onContentHeightChanged: {
-        if (_prevContentHeight === 0 && !_userScrolledUp && !suppressAutoScroll && contentHeight > height) {
-            Qt.callLater(function() { msgList.positionViewAtEnd() })
         }
     }
 
