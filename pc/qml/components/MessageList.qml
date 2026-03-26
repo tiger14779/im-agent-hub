@@ -41,32 +41,32 @@ ListView {
         } else {
             // 新消息追加到尾部：除非用户明确上滚过，否则自动滚到底部
             if (!_userScrolledUp) {
-                Qt.callLater(function() {
-                    msgList.positionViewAtEnd()
-                    _userScrolledUp = false   // 防止 positionViewAtEnd 后因布局延迟误判为上滚
-                })
+                Qt.callLater(function() { msgList.positionViewAtEnd() })
             }
         }
     }
 
     // 内容高度变化时：delegate 延迟渲染可能导致 positionViewAtEnd 后高度再次增长，
-    // 此时需要二次滚到底部，否则 _userScrolledUp 会被误判为 true
+    // 此时需要二次滚到底部
     onContentHeightChanged: {
         if (_prevContentHeight === 0 && !_userScrolledUp && contentHeight > height) {
             Qt.callLater(function() { msgList.positionViewAtEnd() })
         }
     }
 
-    onContentYChanged: {
-        // 判断用户是否在底部（留 120px 余量）
+    // 仅在用户手势（拖拽/滑动）停止后判断是否上滚，
+    // 程序触发的 positionViewAtEnd() 不会触发此信号，彻底避免误判
+    onMovementEnded: {
         if (contentHeight <= height) {
             _userScrolledUp = false
         } else {
             var atBottom = (contentY + height + 120) >= contentHeight
             _userScrolledUp = !atBottom
         }
+    }
 
-        // 滚动到顶部附近时触发加载更多
+    onContentYChanged: {
+        // 仅处理加载更多逻辑，不在此更新 _userScrolledUp
         if (contentY < 50 && hasMore && !loadingMore && count > 0) {
             _prevContentHeight = contentHeight
             requestLoadMore()
