@@ -97,7 +97,15 @@ class ChatWsService {
     this.doConnect()
   }
 
+  /** Whether a connection attempt is already in flight */
+  private get isConnecting() {
+    return this.ws !== null && this.ws.readyState === WebSocket.CONNECTING
+  }
+
   private doConnect() {
+    // Don't abort a connection that's still being established
+    if (this.isConnecting) return
+
     if (this.ws) {
       this.ws.onclose = null
       this.ws.close()
@@ -218,12 +226,12 @@ class ChatWsService {
     this.pendingSends.set(payload.clientMsgId, entry)
     if (this.send('send_message', payload)) {
       this.startAckTimer(payload.clientMsgId)
-    } else {
-      // Send failed — trigger immediate reconnect
-      if (!this.reconnectTimer && !this.intentionalClose) {
-        this.scheduleReconnect()
-      }
+    } else if (!this.isConnecting && !this.reconnectTimer && !this.intentionalClose) {
+      // Only trigger reconnect if NOT already connecting / reconnecting
+      this.scheduleReconnect()
     }
+    // Otherwise: WS is CONNECTING — message stays in pendingSends,
+    // will be sent when onopen fires via flushPendingSends()
   }
 
   /** Start ACK timeout for a specific message */
@@ -402,7 +410,7 @@ class ChatWsService {
   }
 
   private scheduleReconnect() {
-    if (this.reconnectTimer) return
+    if (this.reconnectTimer || this.isConnecting) return
     // Exponential backoff: 0 → 1s → 3s → 6s → 12s → 30s
     const delays = [0, 1000, 3000, 6000, 12000, 30000]
     const delay = delays[Math.min(this.reconnectAttempts, delays.length - 1)]
