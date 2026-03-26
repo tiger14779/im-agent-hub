@@ -116,6 +116,7 @@ const activePeer = ref('')
 const activePeerName = ref('')
 const loadingMore = ref(false)
 const oldestSeq = ref(0)
+let isSyncing = false // flag: true when reloading history after reconnect
 
 function parseContent(m: Message): Message {
   const msg = { ...m }
@@ -180,7 +181,12 @@ async function doLogin() {
 
     chatWs.onHistory = (data) => {
       const parsed = (data.messages as unknown as Message[]).map(parseContent)
-      chatStore.loadHistory(parsed)
+      if (isSyncing) {
+        chatStore.mergeMessages(parsed)
+        isSyncing = false
+      } else {
+        chatStore.loadHistory(parsed)
+      }
       chatStore.hasMore = data.hasMore
       if (parsed.length > 0) {
         oldestSeq.value = Math.min(...parsed.map(m => (m as unknown as { seq: number }).seq || 0))
@@ -197,6 +203,14 @@ async function doLogin() {
       }
       chatWs.connect(res.userId, res.token, 'staff')
     })
+
+    // Sync missed messages on reconnect
+    chatWs.onReconnected = () => {
+      if (activePeer.value) {
+        isSyncing = true
+        chatWs.loadHistory(activePeer.value)
+      }
+    }
 
     // Update URL to include id for refresh
     if (!route.query.id) {

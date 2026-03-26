@@ -62,6 +62,7 @@ class ChatWsService {
   private lastServerTime = 0 // timestamp of last message received from server
   private static readonly PING_INTERVAL = 10000 // 10s
   private static readonly STALE_THRESHOLD = 25000 // 25s no response → stale
+  private isFirstConnect = true // track first vs reconnect
 
   /** Pending sends: clientMsgId → full payload + retry state */
   private pendingSends = new Map<string, {
@@ -78,6 +79,7 @@ class ChatWsService {
   onHistory: (data: HistoryData) => void = () => {}
   onConnected: () => void = () => {}
   onDisconnected: () => void = () => {}
+  onReconnected: () => void = () => {} // fires only on reconnect (not first connect)
 
   /** Build the WebSocket URL based on current page origin */
   private buildWsUrl(): string {
@@ -94,6 +96,7 @@ class ChatWsService {
     this.token = token
     this.role = role
     this.intentionalClose = false
+    this.isFirstConnect = true
     this.doConnect()
   }
 
@@ -121,6 +124,11 @@ class ChatWsService {
       this.onConnected()
       this.startPing()
       this.flushPendingSends()
+      if (!this.isFirstConnect) {
+        // This is a reconnect — notify UI to sync missed messages
+        this.onReconnected()
+      }
+      this.isFirstConnect = false
     }
 
     this.ws.onmessage = (ev) => {

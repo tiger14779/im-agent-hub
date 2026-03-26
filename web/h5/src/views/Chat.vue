@@ -80,6 +80,7 @@ const errorMsg = ref('')
 const serviceUserName = ref('客服')
 const loadingMore = ref(false)
 const oldestSeq = ref(0)
+let isSyncing = false // flag: true when reloading history after reconnect
 
 /* ---- Back-navigation guard ---- */
 const showBackConfirm = ref(false)
@@ -194,7 +195,13 @@ async function init() {
         return msg
       })
 
-      chatStore.loadHistory(parsed)
+      if (isSyncing) {
+        // Reconnect sync: append new messages to the end (don't prepend)
+        chatStore.mergeMessages(parsed)
+        isSyncing = false
+      } else {
+        chatStore.loadHistory(parsed)
+      }
       chatStore.hasMore = data.hasMore
       if (parsed.length > 0) {
         oldestSeq.value = Math.min(...parsed.map(m => (m as unknown as { seq: number }).seq || 0))
@@ -211,9 +218,16 @@ async function init() {
       chatWs.connect(userStore.userId, userStore.token, 'client')
     })
 
+    // 4. Sync missed messages on reconnect
+    chatWs.onReconnected = () => {
+      // Reload history to catch messages received while WS was down
+      isSyncing = true
+      chatWs.loadHistory(serviceId)
+    }
+
     state.value = 'ready'
 
-    // 4. Load recent history
+    // 5. Load recent history
     chatWs.loadHistory(serviceId)
     chatWs.markRead(serviceId)
   } catch (err) {

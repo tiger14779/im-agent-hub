@@ -30,6 +30,13 @@ type ChatHub struct {
 	clients map[string]*ChatConn // userID -> connection
 	mu      sync.RWMutex
 	msgSvc  *service.MessageService
+	msgCh   chan msgTask // serialized message-write channel
+}
+
+// msgTask is a send_message job queued for sequential DB processing.
+type msgTask struct {
+	cc   *ChatConn
+	data json.RawMessage
 }
 
 // ChatConn represents a single WebSocket connection.
@@ -43,9 +50,22 @@ type ChatConn struct {
 
 // NewChatHub creates a new ChatHub.
 func NewChatHub(msgSvc *service.MessageService) *ChatHub {
-	return &ChatHub{
+	h := &ChatHub{
 		clients: make(map[string]*ChatConn),
 		msgSvc:  msgSvc,
+		msgCh:   make(chan msgTask, 256), // buffered channel
+	}
+	// Start worker pool for message writes (2 workers to balance throughput & SQLite contention)
+	for i := 0; i < 2; i++ {
+		go h.msgWorker()
+	}
+	return h
+}
+
+// msgWorker processes send_message tasks sequentially from the channel.
+func (h *ChatHub) msgWorker() {
+	for task := range h.msgCh {
+		h.handleSendMessage(task.cc, task.data)
 	}
 }
 
@@ -169,7 +189,11 @@ func (h *ChatHub) readLoop(cc *ChatConn) {
 
 		switch env.Type {
 		case "send_message":
-			go h.handleSendMessage(cc, env.Data)
+			select {
+			case h.msgCh <- msgTask{cc: cc, data: env.Data}:
+			default:
+				log.Printf("[WS] message channel full, dropping message from %s", cc.userID)
+			}
 		case "load_history":
 			h.handleLoadHistory(cc, env.Data)
 		case "mark_read":

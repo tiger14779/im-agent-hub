@@ -33,6 +33,15 @@ export const useChatStore = defineStore('chat', {
       this.messages = [...newMsgs, ...this.messages]
     },
 
+    /** Merge messages (for reconnect sync): only append truly newer messages */
+    mergeMessages(msgs: Message[]) {
+      const existing = new Set(this.messages.map((m) => m.clientMsgID))
+      const newMsgs = msgs.filter((m) => !existing.has(m.clientMsgID))
+      if (newMsgs.length > 0) {
+        this.messages.push(...newMsgs)
+      }
+    },
+
     clearMessages() {
       this.messages = []
       this.hasMore = true
