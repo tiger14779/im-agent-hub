@@ -165,6 +165,9 @@ func (h *ChatHub) upgradeAndServe(c *gin.Context, userID, role string) {
 	h.mu.Lock()
 	if h.clients[userID] == cc {
 		delete(h.clients, userID)
+		log.Printf("[WS] %s (%s) removed from clients map", userID, role)
+	} else {
+		log.Printf("[WS] %s (%s) cleanup skipped (replaced by newer connection)", userID, role)
 	}
 	h.mu.Unlock()
 
@@ -262,6 +265,7 @@ func (h *ChatHub) handleSendMessage(cc *ChatConn, data json.RawMessage) {
 	})
 
 	// Push to receiver if online
+	log.Printf("[WS] routing new_message from=%s to=%s seq=%d", cc.userID, req.RecvID, msg.Seq)
 	h.sendToUser(req.RecvID, map[string]interface{}{
 		"type": "new_message",
 		"data": map[string]interface{}{
@@ -330,7 +334,7 @@ func (h *ChatHub) handleMarkRead(cc *ChatConn, data json.RawMessage) {
 }
 
 // sendJSON marshals v to JSON and queues it on the connection's write channel.
-// Non-blocking: if the channel is full, the message is dropped (logged).
+// Non-blocking: if the channel is full or connection is closed, the message is dropped.
 func (h *ChatHub) sendJSON(cc *ChatConn, v interface{}) {
 	data, err := json.Marshal(v)
 	if err != nil {
@@ -339,6 +343,8 @@ func (h *ChatHub) sendJSON(cc *ChatConn, v interface{}) {
 	}
 	select {
 	case cc.sendCh <- data:
+	case <-cc.stopCh:
+		log.Printf("[WS] connection stopped, dropping message for %s", cc.userID)
 	default:
 		log.Printf("[WS] send channel full, dropping message for %s", cc.userID)
 	}
@@ -349,7 +355,13 @@ func (h *ChatHub) sendJSON(cc *ChatConn, v interface{}) {
 // This eliminates concurrent write contention entirely.
 func (h *ChatHub) writeLoop(cc *ChatConn) {
 	ticker := time.NewTicker(pingPeriod)
-	defer ticker.Stop()
+	defer func() {
+		ticker.Stop()
+		// writeLoop 退出后必须关闭连接，否则 readLoop 还在跑，
+		// sendCh 无人消费，新消息会被静默丢弃
+		cc.conn.Close()
+		log.Printf("[WS] writeLoop exited for %s, connection closed", cc.userID)
+	}()
 	for {
 		select {
 		case msg, ok := <-cc.sendCh:
@@ -364,6 +376,7 @@ func (h *ChatHub) writeLoop(cc *ChatConn) {
 		case <-ticker.C:
 			cc.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := cc.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				log.Printf("[WS] ping write error to %s: %v", cc.userID, err)
 				return
 			}
 		case <-cc.stopCh:
@@ -377,9 +390,16 @@ func (h *ChatHub) writeLoop(cc *ChatConn) {
 func (h *ChatHub) sendToUser(userID string, v interface{}) {
 	h.mu.RLock()
 	conn, ok := h.clients[userID]
+	var totalClients int
+	if !ok {
+		totalClients = len(h.clients)
+	}
 	h.mu.RUnlock()
 	if ok {
+		log.Printf("[WS] sendToUser: found connection for %s (role=%s), sending", userID, conn.role)
 		h.sendJSON(conn, v)
+	} else {
+		log.Printf("[WS] sendToUser: user %s NOT FOUND in clients map (total=%d)", userID, totalClients)
 	}
 }
 

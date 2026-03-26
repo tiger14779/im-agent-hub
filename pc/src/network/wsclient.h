@@ -98,6 +98,11 @@ private:
     bool m_connected = false;      // 当前连接状态
     int m_reconnectAttempts = 0;   // 已重连次数（用于指数退避计算）
     QMap<QString, PendingSend> m_pendingSends; // 待确认消息队列
+
+    // 挂起的历史加载请求（断线时保存，重连后自动发送）
+    QString m_pendingHistoryPeer;
+    qint64 m_pendingHistorySeq = 0;
+    int m_pendingHistoryLimit = 50;
 };
 
 #endif // WSCLIENT_H

@@ -19,24 +19,41 @@ ListView {
     property bool _userScrolledUp: false
     // 加载更多前记录的 contentHeight，用于恢复滚动位置
     property real _prevContentHeight: 0
+    // 上次 count，用于区分 prepend（头部加载）和 append（新消息）
+    property int _prevCount: 0
 
     onCountChanged: {
-        if (_prevContentHeight > 0) {
+        var added = count - _prevCount
+        _prevCount = count
+
+        if (added <= 0) {
+            // clear() 或 model reset —— 重置所有滚动状态
+            _prevContentHeight = 0
+            _userScrolledUp = false
+            Qt.callLater(function() { msgList.positionViewAtEnd() })
+        } else if (_prevContentHeight > 0) {
             // 在头部插入旧消息后，恢复滚动位置
             Qt.callLater(function() {
                 var delta = contentHeight - _prevContentHeight
                 if (delta > 0) contentY += delta
                 _prevContentHeight = 0
             })
-        } else if (!_userScrolledUp) {
-            Qt.callLater(function() { msgList.positionViewAtEnd() })
+        } else {
+            // 新消息追加到尾部：除非用户明确上滚过，否则自动滚到底部
+            if (!_userScrolledUp) {
+                Qt.callLater(function() { msgList.positionViewAtEnd() })
+            }
         }
     }
 
     onContentYChanged: {
-        // 判断用户是否在底部
-        var atBottom = (contentY + height + 80) >= contentHeight
-        _userScrolledUp = !atBottom
+        // 判断用户是否在底部（留 120px 余量）
+        if (contentHeight <= height) {
+            _userScrolledUp = false
+        } else {
+            var atBottom = (contentY + height + 120) >= contentHeight
+            _userScrolledUp = !atBottom
+        }
 
         // 滚动到顶部附近时触发加载更多
         if (contentY < 50 && hasMore && !loadingMore && count > 0) {

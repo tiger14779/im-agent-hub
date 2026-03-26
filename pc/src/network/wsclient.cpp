@@ -176,6 +176,17 @@ void WsClient::loadHistory(const QString &peerUserId, qint64 beforeSeq, int limi
 {
     qDebug() << "[WsClient] loadHistory connected=" << m_connected << "peerUserId=" << peerUserId
              << "beforeSeq=" << beforeSeq << "limit=" << limit;
+
+    if (!m_connected) {
+        qDebug() << "[WsClient] loadHistory skipped: not connected, saving pending request";
+        m_pendingHistoryPeer = peerUserId;
+        m_pendingHistorySeq = beforeSeq;
+        m_pendingHistoryLimit = limit;
+        return;
+    }
+
+    m_pendingHistoryPeer.clear(); // clear any pending request
+
     QJsonObject data;
     data["peerUserId"] = peerUserId;
     if (beforeSeq > 0)
@@ -199,6 +210,16 @@ void WsClient::onConnected()
     m_ackCheckTimer.start();
     emit connectedChanged();
     flushPendingSends();
+
+    // 重连后重发挂起的历史请求
+    if (!m_pendingHistoryPeer.isEmpty()) {
+        qDebug() << "[WsClient] resending pending loadHistory for" << m_pendingHistoryPeer;
+        QString peer = m_pendingHistoryPeer;
+        qint64 seq = m_pendingHistorySeq;
+        int limit = m_pendingHistoryLimit;
+        m_pendingHistoryPeer.clear();
+        loadHistory(peer, seq, limit);
+    }
 }
 
 void WsClient::onDisconnected()
@@ -267,6 +288,10 @@ void WsClient::handleWsMessage(const QJsonObject &envelope)
     QJsonObject data = envelope["data"].toObject();
 
     if (type == "new_message") {
+        qDebug() << "[WsClient] new_message received: sendID=" << data["sendID"].toString()
+                 << "recvID=" << data["recvID"].toString()
+                 << "type=" << data["contentType"].toInt()
+                 << "clientMsgID=" << data["clientMsgID"].toString();
         emit newMessage(data);
     } else if (type == "message_ack") {
         QString clientMsgId = data["clientMsgId"].toString();

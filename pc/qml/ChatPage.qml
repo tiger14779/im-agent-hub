@@ -541,6 +541,7 @@ Page {
     // ── Functions ────────────────────────────────────────
 
     function openChat(userId) {
+        console.log("[ChatPage] openChat:", userId, "wsConnected:", WsClient.connected)
         activeChatId = userId
         activeChatName = contactModel.getNickname(userId)
         chatModel.clear()
@@ -680,6 +681,10 @@ Page {
             var contentType = msg["contentType"] ?? 101
             var contentStr = msg["content"] ?? ""
 
+            console.log("[ChatPage] onNewMessage: sendID=" + sendID + " recvID=" + recvID
+                        + " type=" + contentType + " staffUserId=" + staffUserId
+                        + " activeChatId=" + activeChatId)
+
             // 解析消息内容 JSON
             var parsed = {}
             try { parsed = JSON.parse(contentStr) } catch(e) { parsed = {"content": contentStr} }
@@ -714,8 +719,11 @@ Page {
 
             // 若此消息属于当前打开的会话，添加到消息列表
             var peerID = sendID === staffUserId ? recvID : sendID
+            console.log("[ChatPage] onNewMessage peerID=" + peerID + " activeChatId=" + activeChatId
+                        + " match=" + (peerID === activeChatId) + " modelCount=" + chatModel.count)
             if (peerID === activeChatId) {
                 chatModel.appendMessage(chatMsg)
+                console.log("[ChatPage] appendMessage done, new count=" + chatModel.count)
             }
 
             // 更新联系人列表的最后消息预览
@@ -749,6 +757,8 @@ Page {
 
         // 历史消息加载完成
         function onHistoryLoaded(peerUserId, messages, hasMore) {
+            console.log("[ChatPage] onHistoryLoaded peer:", peerUserId,
+                        "active:", activeChatId, "msgCount:", messages.length, "hasMore:", hasMore)
             if (peerUserId !== activeChatId) return
             hasMoreHistory = hasMore
 
@@ -800,10 +810,20 @@ Page {
                 chatModel.prependMessages(parsed)
                 loadingMore = false
             } else {
-                // 初次加载：清空后逐条添加
+                // 初次加载：清空后批量插入
                 chatModel.clear()
-                for (var j = 0; j < parsed.length; j++)
-                    chatModel.appendMessage(parsed[j])
+                chatModel.prependMessages(parsed)
+            }
+        }
+
+        // WS 重连后：如果当前有打开的会话且消息为空，重新加载历史
+        function onConnectedChanged() {
+            if (WsClient.connected && activeChatId && chatModel.count === 0) {
+                console.log("[ChatPage] WS reconnected, reloading history for", activeChatId)
+                oldestSeq = 0
+                hasMoreHistory = true
+                loadingMore = false
+                WsClient.loadHistory(activeChatId)
             }
         }
 
