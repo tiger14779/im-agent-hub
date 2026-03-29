@@ -103,6 +103,7 @@ ListView {
                         color: "#999"
                         font.pixelSize: 12
                         elide: Text.ElideRight
+                        maximumLineCount: 1
                         Layout.fillWidth: true
                         visible: text.length > 0
                     }

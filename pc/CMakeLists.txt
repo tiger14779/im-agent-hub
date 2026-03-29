@@ -43,6 +43,7 @@ set(QML_FILES
     qml/components/MessageList.qml
     qml/components/ChatInput.qml
     qml/components/MessageBubble.qml
+    qml/components/ImageViewer.qml
 )
 
 qt_add_executable(${PROJECT_NAME}

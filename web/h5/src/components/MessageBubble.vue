@@ -2,7 +2,17 @@
   <div class="message-item" :class="isSelf ? 'self' : 'other'">
     <!-- Avatar -->
     <div class="avatar">
-      {{ isSelf ? '我' : '客' }}
+      <img
+        v-if="isSelf && myAvatar"
+        :src="myAvatar"
+      />
+      <img
+        v-else-if="!isSelf && staffAvatar"
+        :src="staffAvatar"
+      />
+      <template v-else>
+        {{ isSelf ? '我' : (staffName ? staffName.charAt(0) : '客') }}
+      </template>
     </div>
 
     <!-- Bubble + status -->
@@ -55,6 +65,9 @@ import FileMessage from './FileMessage.vue'
 defineProps<{
   message: Message
   isSelf: boolean
+  staffAvatar?: string
+  staffName?: string
+  myAvatar?: string
 }>()
 </script>
 

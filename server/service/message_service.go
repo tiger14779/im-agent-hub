@@ -164,7 +164,7 @@ func (s *MessageService) GetHistory(convID string, beforeSeq int64, limit int) (
 	}
 
 	var msgs []model.Message
-	q := database.DB.Where("conversation_id = ?", convID)
+	q := database.DB.Where("conversation_id = ? AND deleted = ?", convID, false)
 	if beforeSeq > 0 {
 		q = q.Where("seq < ?", beforeSeq)
 	}
@@ -219,6 +219,19 @@ func (s *MessageService) GetUnreadCount(convID, userID string) int {
 		return conv.UnreadA
 	}
 	return conv.UnreadB
+}
+
+// DeleteMessage soft-deletes a message by serverMsgID.
+// Returns the message (for routing the notification) and error.
+func (s *MessageService) DeleteMessage(serverMsgID string) (*model.Message, error) {
+	var msg model.Message
+	if err := database.DB.Where("server_msg_id = ?", serverMsgID).First(&msg).Error; err != nil {
+		return nil, fmt.Errorf("message not found: %w", err)
+	}
+	if err := database.DB.Model(&msg).Update("deleted", true).Error; err != nil {
+		return nil, fmt.Errorf("delete message: %w", err)
+	}
+	return &msg, nil
 }
 
 // CleanupOldMessages deletes messages and files older than the given cutoff.

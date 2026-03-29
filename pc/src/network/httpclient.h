@@ -54,6 +54,8 @@ public:
     Q_INVOKABLE void addContact(const QString &nickname, const QString &avatar);
     // 更新联系人信息（昵称/头像）: PUT /api/service/contacts/:userId
     Q_INVOKABLE void updateContact(const QString &userId, const QString &nickname, const QString &avatar);
+    // 更新客服自己的个人资料: PUT /api/service/profile
+    Q_INVOKABLE void updateProfile(const QString &nickname, const QString &avatar);
 
     // === 文件上传 ===
     // 上传通用文件（图片/文档等），上传成功后发出 uploadSuccess 信号
@@ -66,6 +68,16 @@ public:
     Q_INVOKABLE void downloadAndOpen(const QString &url, const QString &fileName);
     // 下载文件到指定保存路径
     Q_INVOKABLE void downloadToPath(const QString &url, const QString &savePath);
+
+    // === 剪贴板 ===
+    // 复制文本到系统剪贴板
+    Q_INVOKABLE void copyToClipboard(const QString &text);
+    // 获取剪贴板内容类型和数据: {type: "image"/"file"/"text"/"none", text: "...", paths: [...]}
+    Q_INVOKABLE QJsonObject getClipboardContent();
+    // 将剪贴板中的图片保存到临时文件，返回文件路径（空表示失败）
+    Q_INVOKABLE QString saveClipboardImage();
+    // 下载远程文件后复制到系统剪贴板（可粘贴到资源管理器）
+    Q_INVOKABLE void copyFileToClipboard(const QString &url, const QString &fileName);
 
     // === 设置（持久化） ===
     // 保存登录配置到本地（userId + serverUrl），下次启动自动填充
@@ -91,6 +103,7 @@ signals:
     void contactAdded(const QJsonObject &contact);   // 新增联系人成功
     void contactUpdated(const QJsonObject &contact); // 更新联系人成功
     void contactError(const QString &error);         // 联系人操作失败
+    void profileUpdated(const QJsonObject &data);    // 个人资料更新成功
 
     // ── 上传相关信号 ──
     void uploadSuccess(const QString &url, const QString &fileName, qint64 fileSize); // 文件上传成功

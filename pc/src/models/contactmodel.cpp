@@ -122,10 +122,16 @@ void ContactModel::updateLastMessage(const QString &userId, const QString &text,
     m_contacts[idx].lastMessage = text;
     m_contacts[idx].lastTime = time;
     int fRow = filteredRow(idx);
-    if (fRow >= 0) {
-        QModelIndex mi = index(fRow);
-        emit dataChanged(mi, mi, { LastMessageRole, LastTimeRole });
+    if (fRow < 0) return;
+
+    // 将该联系人移到列表顶部（不影响 activeUserId 选中状态）
+    if (fRow > 0) {
+        beginMoveRows(QModelIndex(), fRow, fRow, QModelIndex(), 0);
+        m_filteredIndices.move(fRow, 0);
+        endMoveRows();
     }
+    QModelIndex mi = index(0);
+    emit dataChanged(mi, mi, { LastMessageRole, LastTimeRole });
 }
 
 void ContactModel::incrementUnread(const QString &userId)

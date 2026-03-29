@@ -11,6 +11,12 @@
 #include <QDesktopServices>
 #include <QDir>
 #include <QUrl>
+#include <QGuiApplication>
+#include <QClipboard>
+#include <QMimeData>
+#include <QImage>
+#include <QUuid>
+#include <QDateTime>
 
 HttpClient::HttpClient(QObject *parent)
     : QObject(parent)
@@ -133,6 +139,21 @@ void HttpClient::updateContact(const QString &userId, const QString &nickname, c
             emit contactUpdated(resp["data"].toObject());
         },
         [this](const QString &err) { emit contactError(err); });
+}
+
+void HttpClient::updateProfile(const QString &nickname, const QString &avatar)
+{
+    QNetworkRequest req = authedRequest("/api/service/profile");
+    QJsonObject body;
+    if (!nickname.isEmpty()) body["nickname"] = nickname;
+    if (!avatar.isEmpty()) body["avatar"] = avatar;
+
+    QNetworkReply *reply = m_nam.put(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    handleReply(reply,
+        [this](const QJsonObject &resp) {
+            emit profileUpdated(resp["data"].toObject());
+        },
+        [](const QString &err) { qWarning() << "[HttpClient] updateProfile error:" << err; });
 }
 
 // ── 文件上传 ─────────────────────────────────────────────
@@ -265,6 +286,112 @@ QString HttpClient::getSetting(const QString &key, const QString &defaultValue)
 {
     QSettings settings;
     return settings.value(key, defaultValue).toString();
+}
+
+// ── 剪贴板操作 ─────────────────────────────────────────
+
+void HttpClient::copyToClipboard(const QString &text)
+{
+    QGuiApplication::clipboard()->setText(text);
+}
+
+QJsonObject HttpClient::getClipboardContent()
+{
+    QJsonObject result;
+    const QClipboard *clipboard = QGuiApplication::clipboard();
+    const QMimeData *mime = clipboard->mimeData();
+
+    if (!mime) {
+        result["type"] = "none";
+        return result;
+    }
+
+    // 优先检测图片
+    if (mime->hasImage()) {
+        result["type"] = "image";
+        return result;
+    }
+
+    // 检测文件列表（从资源管理器复制的文件）
+    if (mime->hasUrls()) {
+        QList<QUrl> urls = mime->urls();
+        QJsonArray paths;
+        for (const QUrl &u : urls) {
+            if (u.isLocalFile())
+                paths.append(u.toLocalFile());
+        }
+        if (!paths.isEmpty()) {
+            result["type"] = "file";
+            result["paths"] = paths;
+            return result;
+        }
+    }
+
+    // 纯文本
+    if (mime->hasText()) {
+        result["type"] = "text";
+        result["text"] = mime->text();
+        return result;
+    }
+
+    result["type"] = "none";
+    return result;
+}
+
+QString HttpClient::saveClipboardImage()
+{
+    const QClipboard *clipboard = QGuiApplication::clipboard();
+    QImage image = clipboard->image();
+    if (image.isNull())
+        return {};
+
+    // 生成唯一文件名保存到临时目录
+    QString fileName = "clipboard_" + QUuid::createUuid().toString(QUuid::Id128).left(8) + ".png";
+    QString savePath = m_tempDir.filePath(fileName);
+
+    if (image.save(savePath, "PNG")) {
+        qDebug() << "[Clipboard] saved image to" << savePath;
+        return savePath;
+    }
+    return {};
+}
+
+void HttpClient::copyFileToClipboard(const QString &url, const QString &fileName)
+{
+    if (url.isEmpty()) return;
+
+    QString fullUrl = url;
+    if (url.startsWith('/'))
+        fullUrl = m_baseUrl + url;
+
+    QString saveName = fileName.isEmpty() ? "download" : fileName;
+    QString savePath = m_tempDir.filePath(saveName);
+
+    QNetworkRequest req{QUrl{fullUrl}};
+    QNetworkReply *reply = m_nam.get(req);
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply, savePath]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            qWarning() << "[Clipboard] download failed:" << reply->errorString();
+            return;
+        }
+        QFile file(savePath);
+        if (!file.open(QIODevice::WriteOnly)) {
+            qWarning() << "[Clipboard] cannot write:" << savePath;
+            return;
+        }
+        file.write(reply->readAll());
+        file.close();
+
+        // 将本地文件路径设置到剪贴板
+        QMimeData *mimeData = new QMimeData();
+        mimeData->setUrls({QUrl::fromLocalFile(savePath)});
+        QGuiApplication::clipboard()->setMimeData(mimeData);
+        qDebug() << "[Clipboard] file copied:" << savePath;
+
+        emit downloadFinished(savePath);
+    });
 }
 
 // ── 文件下载 ─────────────────────────────────────────────

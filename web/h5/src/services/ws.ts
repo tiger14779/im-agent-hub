@@ -80,6 +80,7 @@ class ChatWsService {
   onConnected: () => void = () => {}
   onDisconnected: () => void = () => {}
   onReconnected: () => void = () => {} // fires only on reconnect (not first connect)
+  onMessageDeleted: (serverMsgId: string) => void = () => {} // message deleted by peer
 
   /** Build the WebSocket URL based on current page origin */
   private buildWsUrl(): string {
@@ -177,6 +178,12 @@ class ChatWsService {
       }
       case 'pong':
         break
+      case 'message_deleted':
+      case 'delete_ack': {
+        const d = env.data as { serverMsgId: string }
+        if (d.serverMsgId) this.onMessageDeleted(d.serverMsgId)
+        break
+      }
       default:
         console.log('[WS] unknown type', env.type)
     }

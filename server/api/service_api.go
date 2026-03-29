@@ -195,3 +195,38 @@ func ServiceGetProfile() gin.HandlerFunc {
 		})
 	}
 }
+
+// ServiceUpdateProfile updates the service staff's own nickname and avatar.
+// PUT /api/service/profile
+func ServiceUpdateProfile() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		staffID := c.GetString("serviceUserId")
+		var req struct {
+			Nickname *string `json:"nickname"`
+			Avatar   *string `json:"avatar"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			pkg.Fail(c, 400, "invalid request")
+			return
+		}
+		updates := map[string]interface{}{}
+		if req.Nickname != nil {
+			updates["nickname"] = *req.Nickname
+		}
+		if req.Avatar != nil {
+			updates["avatar"] = *req.Avatar
+		}
+		if len(updates) == 0 {
+			pkg.Fail(c, 400, "nothing to update")
+			return
+		}
+		database.DB.Model(&model.ServiceStaff{}).Where("user_id = ?", staffID).Updates(updates)
+		var staff model.ServiceStaff
+		database.DB.First(&staff, "user_id = ?", staffID)
+		pkg.Success(c, gin.H{
+			"userId":   staff.UserID,
+			"nickname": staff.Nickname,
+			"avatar":   staff.Avatar,
+		})
+	}
+}

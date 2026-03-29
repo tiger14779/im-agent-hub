@@ -51,6 +51,9 @@ func SetupRouter(
 	r.POST("/api/upload", UploadFile())
 	r.GET("/api/files/*path", ServeUploadedFiles())
 
+	// Lottery data proxy (avoid CORS)
+	r.GET("/api/lottery/latest", LotteryLatest())
+
 	// WebSocket for service staff messaging
 	r.GET("/api/service/ws", chatHub.HandleStaffWS)
 
@@ -58,6 +61,7 @@ func SetupRouter(
 	svc := r.Group("/api/service", ServiceTokenAuth())
 	{
 		svc.GET("/profile", ServiceGetProfile())
+		svc.PUT("/profile", ServiceUpdateProfile())
 		svc.GET("/contacts", ServiceGetContacts())
 		svc.POST("/contacts", ServiceAddUser(userSvc, chatHub))
 		svc.PUT("/contacts/:userId", ServiceUpdateContact())

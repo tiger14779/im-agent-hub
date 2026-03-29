@@ -13,7 +13,13 @@
         {{ formatTime(item.sendTime) }}
       </div>
 
-      <MessageBubble :message="item" :is-self="item.sendID === myId" />
+      <MessageBubble
+        :message="item"
+        :is-self="item.sendID === myId"
+        :staff-avatar="staffAvatar"
+        :staff-name="staffName"
+        :my-avatar="myAvatar"
+      />
     </template>
   </div>
 </template>
@@ -28,6 +34,9 @@ const props = defineProps<{
   myId: string
   loadingMore?: boolean
   hasMore?: boolean
+  staffAvatar?: string
+  staffName?: string
+  myAvatar?: string
 }>()
 
 const emit = defineEmits<{

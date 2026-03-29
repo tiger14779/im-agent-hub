@@ -10,6 +10,7 @@ Page {
     id: chatRoot
     property string staffUserId: ""     // 当前客服用户ID
     property string staffNickname: ""   // 当前客服昵称
+    property string staffAvatarUrl: ""  // 当前客服头像URL
     property string authToken: ""       // 认证令牌
     property string serverUrl: ""       // 服务器地址
     property string activeChatId: ""    // 当前打开的会话用户ID
@@ -87,15 +88,34 @@ Page {
                 anchors.topMargin: 12
                 spacing: 4
 
-                // 客服头像（取昵称首字母）
+                // 客服头像（点击可编辑个人资料）
                 Rectangle {
                     Layout.alignment: Qt.AlignHCenter
                     width: 36; height: 36; radius: 6
                     color: "#07c160"
+                    clip: true
+
+                    Image {
+                        id: staffAvatarImg
+                        anchors.fill: parent
+                        source: staffAvatarUrl.length > 0
+                                ? (staffAvatarUrl.charAt(0) === '/' ? HttpClient.baseUrl + staffAvatarUrl : staffAvatarUrl)
+                                : ""
+                        visible: status === Image.Ready
+                        fillMode: Image.PreserveAspectCrop
+                    }
+
                     Label {
                         anchors.centerIn: parent
                         text: (staffNickname || "S").charAt(0).toUpperCase()
                         color: "white"; font.pixelSize: 16; font.bold: true
+                        visible: staffAvatarImg.status !== Image.Ready
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: profileEditDialog.open()
                     }
                 }
 
@@ -231,7 +251,11 @@ Page {
 
         // ── 中间面板（联系人列表 / 会话列表）─────
         Rectangle {
-            Layout.preferredWidth: 260
+            id: contactPanel
+            property real panelWidth: 260
+            readonly property real minPanelWidth: 160
+            readonly property real maxPanelWidth: 400
+            Layout.preferredWidth: panelWidth
             Layout.fillHeight: true
             color: "#e7e7e7"
 
@@ -360,6 +384,36 @@ Page {
             }
         }
 
+        // 侧边栏右侧拖拽手柄 —— 拖动可调整联系人面板宽度
+        Rectangle {
+            Layout.preferredWidth: 1
+            Layout.fillHeight: true
+            color: "#d6d6d6"
+
+            MouseArea {
+                anchors.fill: parent
+                anchors.leftMargin: -3
+                anchors.rightMargin: -3
+                hoverEnabled: true
+                cursorShape: Qt.SizeHorCursor
+                property real startX: 0
+                property real startWidth: 0
+
+                onPressed: function(mouse) {
+                    startX = mapToGlobal(mouse.x, mouse.y).x
+                    startWidth = contactPanel.panelWidth
+                }
+                onPositionChanged: function(mouse) {
+                    if (!pressed) return
+                    var currentX = mapToGlobal(mouse.x, mouse.y).x
+                    var delta = currentX - startX
+                    var newW = Math.max(contactPanel.minPanelWidth,
+                                        Math.min(contactPanel.maxPanelWidth, startWidth + delta))
+                    contactPanel.panelWidth = newW
+                }
+            }
+        }
+
         // ── Right chat area ──────────────────────────────
         Rectangle {
             Layout.fillWidth: true
@@ -398,15 +452,26 @@ Page {
                     Layout.fillHeight: true
                     model: chatModel
                     selfId: staffUserId
+                    peerAvatarUrl: contactModel.getAvatar(activeChatId)
+                    serverUrl: HttpClient.baseUrl
                     loadingMore: chatRoot.loadingMore
                     hasMore: chatRoot.hasMoreHistory
                     suppressAutoScroll: chatRoot._mergeMode
                     onRequestLoadMore: chatRoot.loadMoreHistory()
+                    onDeleteRequested: function(serverMsgId, clientMsgId) {
+                        WsClient.deleteMessage(serverMsgId)
+                        chatModel.removeMessageByServerMsgID(serverMsgId)
+                    }
+                    onImageViewRequested: function(url) {
+                        imageViewer.imageSource = url
+                        imageViewer.open()
+                    }
                 }
 
                 // 聊天输入栏（工具条 + 文本输入区）
                 ChatInput {
                     Layout.fillWidth: true
+                    Layout.preferredHeight: inputHeight
                     onSendText: function(text) {
                         sendTextMessage(text)
                     }
@@ -444,6 +509,7 @@ Page {
     property string contextUserId: ""         // 右键菜单选中的用户ID
     property string pendingAvatarUrl: ""      // 添加对话框的待上传头像URL
     property string editPendingAvatarUrl: ""  // 编辑对话框的待上传头像URL
+    property string pendingProfileAvatarUrl: ""  // 个人资料对话框的待上传头像URL
 
     // 头像文件选择器（添加/编辑共用）
     FileDialog {
@@ -461,6 +527,8 @@ Page {
         function onAvatarUploaded(url) {
             if (avatarFileDialog.target === "add") {
                 pendingAvatarUrl = url
+            } else if (avatarFileDialog.target === "profile") {
+                pendingProfileAvatarUrl = url
             } else {
                 editPendingAvatarUrl = url
             }
@@ -642,6 +710,71 @@ Page {
         }
     }
 
+    // ── 个人资料编辑对话框 ────────────────────
+    Dialog {
+        id: profileEditDialog
+        title: "编辑个人资料"
+        anchors.centerIn: parent
+        modal: true; width: 320
+
+        ColumnLayout {
+            width: parent.width; spacing: 12
+
+            // 头像预览 + 上传按钮
+            RowLayout {
+                Layout.alignment: Qt.AlignHCenter
+                spacing: 12
+                Rectangle {
+                    width: 56; height: 56; radius: 28
+                    color: "#07c160"
+                    clip: true
+                    Image {
+                        anchors.fill: parent
+                        source: {
+                            var url = pendingProfileAvatarUrl.length > 0
+                                      ? pendingProfileAvatarUrl
+                                      : staffAvatarUrl
+                            return url.length > 0 ? (url.charAt(0) === '/' ? HttpClient.baseUrl + url : url) : ""
+                        }
+                        visible: status === Image.Ready
+                        fillMode: Image.PreserveAspectCrop
+                    }
+                    Label {
+                        anchors.centerIn: parent
+                        text: (profileNicknameField.text || staffNickname || "S").charAt(0).toUpperCase()
+                        color: "white"; font.pixelSize: 20; font.bold: true
+                        visible: pendingProfileAvatarUrl.length === 0 && staffAvatarUrl.length === 0
+                    }
+                }
+                Button {
+                    text: "上传头像"
+                    onClicked: {
+                        avatarFileDialog.target = "profile"
+                        avatarFileDialog.open()
+                    }
+                }
+            }
+
+            TextField {
+                id: profileNicknameField
+                placeholderText: "客服昵称"
+                text: staffNickname
+                Layout.fillWidth: true
+            }
+        }
+
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        onAccepted: {
+            var avatar = pendingProfileAvatarUrl.length > 0 ? pendingProfileAvatarUrl : staffAvatarUrl
+            HttpClient.updateProfile(profileNicknameField.text.trim(), avatar)
+            pendingProfileAvatarUrl = ""
+        }
+        onRejected: {
+            pendingProfileAvatarUrl = ""
+            profileNicknameField.text = staffNickname
+        }
+    }
+
     // ── Functions ────────────────────────────────────────
 
     function openChat(userId) {
@@ -708,6 +841,11 @@ Page {
                 activeChatName = contactModel.getNickname(uid)
             }
         }
+        // 个人资料更新成功
+        function onProfileUpdated(data) {
+            staffNickname = data["nickname"] ?? staffNickname
+            staffAvatarUrl = data["avatar"] ?? staffAvatarUrl
+        }
         // 文件上传成功回调 —— 根据上下文判断是普通发送还是桥接器发送
         function onUploadSuccess(url, origName, origSize) {
             console.log("[上传] 成功 url=" + url + " origName=" + origName + " origSize=" + origSize)
@@ -750,7 +888,7 @@ Page {
                     // 只有目标是当前聊天对象时才插入消息列表，否则仅发送
                     var bFileMsgId = ""
                     if (bridgeTarget === activeChatId) {
-                        bFileMsgId = chatModel.addPendingMessage(bridgeTarget, 105, "", "", origName, origSize)
+                        bFileMsgId = chatModel.addPendingMessage(bridgeTarget, 105, "", resolveUrl(url), origName, origSize)
                     } else {
                         bFileMsgId = chatModel.generateMsgId()
                     }
@@ -787,7 +925,7 @@ Page {
                 var fileContent = JSON.stringify({
                     "url": url, "name": origName, "size": origSize
                 })
-                var fileMsgId = chatModel.addPendingMessage(activeChatId, 105, "", "", origName, origSize)
+                var fileMsgId = chatModel.addPendingMessage(activeChatId, 105, "", resolveUrl(url), origName, origSize)
                 WsClient.sendMessage(activeChatId, 105, fileContent, fileMsgId)
                 contactModel.updateLastMessage(activeChatId, "[\u6587\u4EF6]", Date.now())
             }
@@ -904,7 +1042,7 @@ Page {
 
         // 发送消息应答：更新发送状态
         function onMessageAck(clientMsgId, status, serverMsgId, sendTime) {
-            chatModel.updateStatus(clientMsgId, status)
+            chatModel.updateStatus(clientMsgId, status, serverMsgId)
         }
 
         // 历史消息加载完成
@@ -1001,6 +1139,11 @@ Page {
         function onContactsUpdated() {
             HttpClient.getContacts()
         }
+
+        // 消息被删除（自己或对方删除）
+        function onMessageDeleted(serverMsgId) {
+            chatModel.removeMessageByServerMsgID(serverMsgId)
+        }
     }
 
     // ── WxBridge 桥接器信号处理 ─────────────────
@@ -1055,4 +1198,10 @@ Page {
 
     // 桥接器待处理上传队列（FIFO，每个上传对应一个条目）
     property var _pendingBridgeQueue: []
+
+    // 图片查看器
+    ImageViewer {
+        id: imageViewer
+        parent: Overlay.overlay
+    }
 }

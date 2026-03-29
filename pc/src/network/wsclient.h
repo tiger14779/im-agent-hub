@@ -42,6 +42,9 @@ public:
     // 加载与某个用户的历史聊天记录（支持分页）
     Q_INVOKABLE void loadHistory(const QString &peerUserId, qint64 beforeSeq = 0, int limit = 50);
 
+    // 删除消息（通过 serverMsgId）
+    Q_INVOKABLE void deleteMessage(const QString &serverMsgId);
+
 signals:
     void connectedChanged();                                    // 连接状态变化
     // 收到其他用户发来的新消息（经 OpenIM 轮询获取）
@@ -52,6 +55,8 @@ signals:
     void historyLoaded(const QString &peerUserId, const QJsonArray &messages, bool hasMore);
     // 服务器端联系人列表发生变化
     void contactsUpdated();
+    // 消息被对方删除
+    void messageDeleted(const QString &serverMsgId);
     // 连接错误
     void connectionError(const QString &error);
 

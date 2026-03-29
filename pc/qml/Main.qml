@@ -7,7 +7,7 @@ ApplicationWindow {
     id: root
     width: 1000
     height: 680
-    minimumWidth: 860
+    minimumWidth: 600
     minimumHeight: 540
     visible: true
     title: "IM Agent Hub - \u5BA2\u670D\u7AEF"

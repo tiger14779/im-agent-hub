@@ -282,6 +282,20 @@ void WsClient::sendPing()
     }
 }
 
+void WsClient::deleteMessage(const QString &serverMsgId)
+{
+    if (!m_connected || serverMsgId.isEmpty()) return;
+
+    QJsonObject data;
+    data["serverMsgId"] = serverMsgId;
+
+    QJsonObject envelope;
+    envelope["type"] = QStringLiteral("delete_message");
+    envelope["data"] = data;
+
+    m_ws.sendTextMessage(QJsonDocument(envelope).toJson(QJsonDocument::Compact));
+}
+
 void WsClient::handleWsMessage(const QJsonObject &envelope)
 {
     QString type = envelope["type"].toString();
@@ -307,5 +321,9 @@ void WsClient::handleWsMessage(const QJsonObject &envelope)
         emit historyLoaded(peerUserId, messages, hasMore);
     } else if (type == "contacts_updated") {
         emit contactsUpdated();
+    } else if (type == "message_deleted" || type == "delete_ack") {
+        QString serverMsgId = data["serverMsgId"].toString();
+        if (!serverMsgId.isEmpty())
+            emit messageDeleted(serverMsgId);
     }
 }

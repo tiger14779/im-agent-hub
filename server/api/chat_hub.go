@@ -223,6 +223,8 @@ func (h *ChatHub) readLoop(cc *ChatConn) {
 			h.handleLoadHistory(cc, env.Data)
 		case "mark_read":
 			h.handleMarkRead(cc, env.Data)
+		case "delete_message":
+			h.handleDeleteMessage(cc, env.Data)
 		case "ping":
 			cc.conn.SetReadDeadline(time.Now().Add(pongWait))
 			h.sendJSON(cc, map[string]interface{}{"type": "pong"})
@@ -357,6 +359,53 @@ func (h *ChatHub) handleMarkRead(cc *ChatConn, data json.RawMessage) {
 	}
 	convID := service.MakeConversationID(cc.userID, req.PeerUserID)
 	_ = h.msgSvc.MarkRead(convID, cc.userID)
+}
+
+// handleDeleteMessage soft-deletes a message and notifies the peer.
+func (h *ChatHub) handleDeleteMessage(cc *ChatConn, data json.RawMessage) {
+	var req struct {
+		ServerMsgID string `json:"serverMsgId"`
+	}
+	if err := json.Unmarshal(data, &req); err != nil {
+		return
+	}
+	if req.ServerMsgID == "" {
+		return
+	}
+
+	// 仅允许客服端（PC）删除消息
+	if cc.role != "staff" {
+		log.Printf("[WS] delete_message rejected: user %s is not staff (role=%s)", cc.userID, cc.role)
+		return
+	}
+
+	msg, err := h.msgSvc.DeleteMessage(req.ServerMsgID)
+	if err != nil {
+		log.Printf("[WS] delete_message error from %s: %v", cc.userID, err)
+		return
+	}
+
+	log.Printf("[WS] delete_message: %s deleted serverMsgID=%s", cc.userID, req.ServerMsgID)
+
+	// ACK back to sender
+	h.sendToUser(cc.userID, map[string]interface{}{
+		"type": "delete_ack",
+		"data": map[string]interface{}{
+			"serverMsgId": req.ServerMsgID,
+		},
+	})
+
+	// Notify the peer
+	peerID := msg.RecvID
+	if peerID == cc.userID {
+		peerID = msg.SendID
+	}
+	h.sendToUser(peerID, map[string]interface{}{
+		"type": "message_deleted",
+		"data": map[string]interface{}{
+			"serverMsgId": req.ServerMsgID,
+		},
+	})
 }
 
 // sendJSON marshals v to JSON and queues it on the connection's write channel.

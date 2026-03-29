@@ -19,8 +19,13 @@ Item {
     property int voiceDuration: 0      // 语音时长（秒）
     property int msgStatus: 2          // 发送状态: 1=发送中, 2=已发送, 3=失败
     property real sendTime: 0          // 发送时间戳
+    property string avatarUrl: ""      // 头像URL（对方或自己）
+    property string serverMsgId: ""    // 服务器消息ID（用于删除）
+    property string clientMsgId: ""    // 客户端消息ID
 
     signal imageLoaded()               // 图片加载完成信号（用于通知列表补偿滚动）
+    signal deleteRequested(string serverMsgId, string clientMsgId)  // 请求删除消息
+    signal imageViewRequested(string url)  // 请求查看大图
 
     RowLayout {
         id: bubbleRow
@@ -40,12 +45,22 @@ Item {
             width: 36; height: 36; radius: 4
             color: isSelf ? "#07c160" : "#4a90d9"
             Layout.alignment: Qt.AlignTop
+            clip: true
+
+            Image {
+                id: avatarImg
+                anchors.fill: parent
+                source: avatarUrl
+                visible: status === Image.Ready
+                fillMode: Image.PreserveAspectCrop
+            }
 
             Label {
                 anchors.centerIn: parent
                 text: isSelf ? "\u6211" : "\u4ED6"
                 color: "white"
                 font.pixelSize: 14
+                visible: avatarImg.status !== Image.Ready
             }
         }
 
@@ -79,19 +94,30 @@ Item {
 
                 Component {
                     id: textComponent
-                    Label {
+                    TextEdit {
                         text: textContent
                         wrapMode: Text.Wrap
                         width: Math.min(implicitWidth, bubble.width * 0.55 - 40)
                         color: "#333"
                         font.pixelSize: 14
-                        lineHeight: 1.35
+                        readOnly: true
+                        selectByMouse: true
+                        selectedTextColor: "#fff"
+                        selectionColor: "#07c160"
+                        MouseArea {
+                            anchors.fill: parent
+                            acceptedButtons: Qt.RightButton
+                            onClicked: function(mouse) {
+                                contextMenu.popup()
+                            }
+                        }
                     }
                 }
 
                 MouseArea {
                     anchors.fill: parent
                     acceptedButtons: Qt.RightButton
+                    visible: contentType !== 101
                     onClicked: function(mouse) {
                         if (mouse.button === Qt.RightButton) {
                             contextMenu.popup()
@@ -106,11 +132,16 @@ Item {
                         visible: contentType === 101
                         height: visible ? implicitHeight : 0
                         onTriggered: {
-                            if (textContent.length > 0) {
-                                clipHelper.text = textContent
-                                clipHelper.selectAll()
-                                clipHelper.copy()
-                            }
+                            if (textContent.length > 0)
+                                HttpClient.copyToClipboard(textContent)
+                        }
+                    }
+                    MenuItem {
+                        text: "\u590D\u5236\u56FE\u7247"
+                        visible: contentType === 102 && imageUrl.length > 0
+                        height: visible ? implicitHeight : 0
+                        onTriggered: {
+                            HttpClient.copyFileToClipboard(imageUrl, "image." + imageUrl.split(".").pop())
                         }
                     }
                     MenuItem {
@@ -133,6 +164,14 @@ Item {
                         }
                     }
                     MenuItem {
+                        text: "\u590D\u5236\u6587\u4EF6"
+                        visible: contentType === 105 && imageUrl.length > 0
+                        height: visible ? implicitHeight : 0
+                        onTriggered: {
+                            HttpClient.copyFileToClipboard(imageUrl, fileName || "download")
+                        }
+                    }
+                    MenuItem {
                         text: "\u53E6\u5B58\u4E3A..."
                         visible: contentType === 105 && imageUrl.length > 0
                         height: visible ? implicitHeight : 0
@@ -140,6 +179,15 @@ Item {
                             globalSaveDialog.downloadUrl = imageUrl
                             globalSaveDialog.currentFile = fileName ? ("file:///" + fileName) : ""
                             globalSaveDialog.open()
+                        }
+                    }
+                    MenuSeparator { visible: isSelf && serverMsgId.length > 0 }
+                    MenuItem {
+                        text: "\u5220\u9664"
+                        visible: isSelf && serverMsgId.length > 0
+                        height: visible ? implicitHeight : 0
+                        onTriggered: {
+                            bubble.deleteRequested(serverMsgId, clientMsgId)
                         }
                     }
                 }
@@ -157,11 +205,6 @@ Item {
                     }
                 }
 
-                TextEdit {
-                    id: clipHelper
-                    visible: false
-                }
-
                 Component {
                     id: imageComponent
                     Image {
@@ -175,6 +218,20 @@ Item {
                         onStatusChanged: {
                             if (status === Image.Ready)
                                 bubble.imageLoaded()
+                        }
+
+                        // 双击放大查看
+                        MouseArea {
+                            anchors.fill: parent
+                            acceptedButtons: Qt.LeftButton | Qt.RightButton
+                            onDoubleClicked: {
+                                if (imageUrl.length > 0)
+                                    bubble.imageViewRequested(imageUrl)
+                            }
+                            onClicked: function(mouse) {
+                                if (mouse.button === Qt.RightButton)
+                                    contextMenu.popup()
+                            }
                         }
 
                         // 加载中指示器

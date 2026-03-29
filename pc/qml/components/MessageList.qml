@@ -10,10 +10,14 @@ ListView {
     verticalLayoutDirection: ListView.TopToBottom
 
     property string selfId: ""          // 当前用户ID，用于判断消息方向
+    property string peerAvatarUrl: ""   // 对方头像URL
+    property string serverUrl: ""       // 服务器地址（用于拼接头像URL）
     property bool loadingMore: false    // 是否正在加载更多历史消息
     property bool hasMore: true         // 是否还有更多历史消息
 
     signal requestLoadMore()            // 向上滚动到顶部时触发
+    signal deleteRequested(string serverMsgId, string clientMsgId)  // 请求删除消息
+    signal imageViewRequested(string url)  // 请求查看大图
 
     // 抑制自动滚动（合并同步期间设为 true，避免干扰用户浏览）
     property bool suppressAutoScroll: false
@@ -152,10 +156,24 @@ ListView {
         voiceDuration: model.voiceDuration
         msgStatus: model.status
         sendTime: model.sendTime
+        serverMsgId: model.serverMsgID || ""
+        clientMsgId: model.clientMsgID || ""
+        avatarUrl: model.isSelf ? "" : (function() {
+            var url = msgList.peerAvatarUrl || ""
+            if (url.length > 0 && url.charAt(0) === '/')
+                return msgList.serverUrl + url
+            return url
+        })()
 
         onImageLoaded: {
             if (!msgList._userScrolledUp && !msgList.suppressAutoScroll)
                 _scrollFixTimer.begin()
+        }
+        onDeleteRequested: function(sMsgId, cMsgId) {
+            msgList.deleteRequested(sMsgId, cMsgId)
+        }
+        onImageViewRequested: function(url) {
+            msgList.imageViewRequested(url)
         }
     }
 

@@ -2,6 +2,8 @@ package api
 
 import (
 	"im-agent-hub/config"
+	"im-agent-hub/database"
+	"im-agent-hub/model"
 	"im-agent-hub/pkg"
 	"im-agent-hub/service"
 
@@ -39,11 +41,25 @@ func ClientLogin(userSvc *service.UserService) gin.HandlerFunc {
 			return
 		}
 
+		// Look up service staff info for the client to display
+		serviceNickname := "客服"
+		serviceAvatar := ""
+		var staff model.ServiceStaff
+		if err := database.DB.First(&staff, "user_id = ?", user.ServiceUserID).Error; err == nil {
+			if staff.Nickname != "" {
+				serviceNickname = staff.Nickname
+			}
+			serviceAvatar = staff.Avatar
+		}
+
 		pkg.Success(c, gin.H{
-			"token":         token,
-			"userId":        user.ID,
-			"nickname":      user.Nickname,
-			"serviceUserId": user.ServiceUserID,
+			"token":           token,
+			"userId":          user.ID,
+			"nickname":        user.Nickname,
+			"avatar":          user.Avatar,
+			"serviceUserId":   user.ServiceUserID,
+			"serviceNickname": serviceNickname,
+			"serviceAvatar":   serviceAvatar,
 		})
 	}
 }

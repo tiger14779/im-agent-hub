@@ -13,6 +13,7 @@ type Message struct {
 	SendTime       int64  `gorm:"index" json:"sendTime"`
 	Seq            int64  `gorm:"index" json:"seq"` // per-conversation sequence
 	Status         int    `json:"status"`           // 1=sending, 2=delivered, 3=failed
+	Deleted        bool   `json:"deleted"`          // soft-delete flag
 }
 
 // Conversation tracks the latest state of a chat between two users.

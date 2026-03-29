@@ -15,6 +15,9 @@
 
     <!-- Chat UI (always rendered so transitions work) -->
     <template v-if="state === 'ready'">
+      <!-- Lottery result -->
+      <LotteryResult />
+
       <!-- Header -->
       <header class="chat-header">
         <button class="back-btn" @click="onBackClick">‹</button>
@@ -28,6 +31,9 @@
         :my-id="userStore.userId"
         :loading-more="loadingMore"
         :has-more="chatStore.hasMore"
+        :staff-avatar="userStore.serviceAvatar"
+        :staff-name="userStore.serviceNickname"
+        :my-avatar="userStore.avatar"
         @load-more="onLoadMore"
       />
 
@@ -67,6 +73,7 @@ import request from '@/utils/request'
 import type { Message } from '@/types'
 import MessageList from '@/components/MessageList.vue'
 import ChatInput from '@/components/ChatInput.vue'
+import LotteryResult from '@/components/LotteryResult.vue'
 
 type PageState = 'loading' | 'ready' | 'error'
 
@@ -148,17 +155,23 @@ async function init() {
       token: string
       userId: string
       nickname?: string
+      avatar?: string
       serviceUserId?: string
+      serviceNickname?: string
+      serviceAvatar?: string
     }>('/client/auth/login', { userId: targetId })
 
     userStore.login({
       userId: targetId,
       token: res.token,
       nickname: res.nickname,
-      serviceUserId: res.serviceUserId
+      avatar: res.avatar,
+      serviceUserId: res.serviceUserId,
+      serviceNickname: res.serviceNickname,
+      serviceAvatar: res.serviceAvatar
     })
 
-    serviceUserName.value = '客服'
+    serviceUserName.value = res.serviceNickname || '客服'
     const serviceId = userStore.serviceUserId || targetId
 
     if (!userStore.token) {
@@ -176,6 +189,10 @@ async function init() {
         ack.status,
         ack.serverMsgId
       )
+    }
+
+    chatWs.onMessageDeleted = (serverMsgId: string) => {
+      chatStore.removeMessageByServerMsgID(serverMsgId)
     }
 
     chatWs.onHistory = (data) => {

@@ -45,6 +45,10 @@ export const useChatStore = defineStore('chat', {
     clearMessages() {
       this.messages = []
       this.hasMore = true
+    },
+
+    removeMessageByServerMsgID(serverMsgID: string) {
+      this.messages = this.messages.filter((m) => m.serverMsgID !== serverMsgID)
     }
   }
 })

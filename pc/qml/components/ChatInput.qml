@@ -2,23 +2,86 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Dialogs
+import ImAgentHub
 
-// 聊天输入栏组件 —— 包含工具栏（表情/图片/文件）和文本输入区
+// 聊天输入栏组件 —— 包含工具栏（表情/图片/文件）、预览区和文本输入区
 Rectangle {
     id: chatInput
-    implicitHeight: toolBar.height + inputRow.height + 12
+    property real inputHeight: 140     // 当前输入区高度（可拖拽调整）
+    readonly property real minInputHeight: 80
+    readonly property real maxInputHeight: 400
+    implicitHeight: inputHeight
     color: "#f5f5f5"
 
     signal sendText(string text)       // 发送文本消息
     signal sendFile(string filePath)   // 发送文件
     signal sendImage(string filePath)  // 发送图片
 
+    // 待发送的附件列表: [{path, type, name}]  type: "image" | "file"
+    property var pendingFiles: []
+
+    function addPendingFile(path, type) {
+        var name = path.replace(/\\/g, "/").split("/").pop()
+        var list = pendingFiles.slice()
+        // 去重
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].path === path) return
+        }
+        list.push({path: path, type: type, name: name})
+        pendingFiles = list
+    }
+
+    function removePendingFile(index) {
+        var list = pendingFiles.slice()
+        list.splice(index, 1)
+        pendingFiles = list
+    }
+
+    function clearPending() {
+        pendingFiles = []
+    }
+
+    function isImageFile(path) {
+        var lower = path.toLowerCase()
+        return lower.endsWith(".png") || lower.endsWith(".jpg") ||
+               lower.endsWith(".jpeg") || lower.endsWith(".gif") ||
+               lower.endsWith(".bmp") || lower.endsWith(".webp")
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
 
-        // 顶部分割线
-        Rectangle { Layout.fillWidth: true; height: 1; color: "#ddd" }
+        // 顶部拖拽手柄 —— 鼠标上下拖动可调整输入区高度
+        Rectangle {
+            Layout.fillWidth: true
+            height: 1
+            color: "#ddd"
+
+            MouseArea {
+                id: dragArea
+                anchors.fill: parent
+                anchors.topMargin: -4
+                anchors.bottomMargin: -4
+                hoverEnabled: true
+                cursorShape: Qt.SizeVerCursor
+                property real startY: 0
+                property real startHeight: 0
+
+                onPressed: function(mouse) {
+                    startY = mapToGlobal(mouse.x, mouse.y).y
+                    startHeight = chatInput.inputHeight
+                }
+                onPositionChanged: function(mouse) {
+                    if (!pressed) return
+                    var currentY = mapToGlobal(mouse.x, mouse.y).y
+                    var delta = startY - currentY
+                    var newH = Math.max(chatInput.minInputHeight,
+                                        Math.min(chatInput.maxInputHeight, startHeight + delta))
+                    chatInput.inputHeight = newH
+                }
+            }
+        }
 
         // 工具栏
         RowLayout {
@@ -60,6 +123,93 @@ Rectangle {
             Item { Layout.fillWidth: true }
         }
 
+        // 附件预览区（有待发送文件时显示）
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: pendingFiles.length > 0 ? previewFlow.height + 12 : 0
+            visible: pendingFiles.length > 0
+            color: "#f5f5f5"
+
+            Flow {
+                id: previewFlow
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.leftMargin: 10
+                anchors.rightMargin: 10
+                anchors.topMargin: 4
+                spacing: 8
+
+                Repeater {
+                    model: pendingFiles.length
+                    delegate: Rectangle {
+                        width: pendingFiles[index].type === "image" ? 68 : Math.min(fileNameLabel.implicitWidth + 36, 180)
+                        height: pendingFiles[index].type === "image" ? 68 : 32
+                        radius: 4
+                        color: "#fff"
+                        border.color: "#e0e0e0"
+
+                        // 图片预览缩略图
+                        Image {
+                            anchors.fill: parent
+                            anchors.margins: 2
+                            source: pendingFiles[index].type === "image" ? "file:///" + pendingFiles[index].path : ""
+                            visible: pendingFiles[index].type === "image"
+                            fillMode: Image.PreserveAspectCrop
+                        }
+
+                        // 文件名标签（文件类型）
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 6
+                            anchors.rightMargin: 20
+                            visible: pendingFiles[index].type === "file"
+                            spacing: 4
+
+                            Label {
+                                text: "\uD83D\uDCC4"
+                                font.pixelSize: 14
+                            }
+                            Label {
+                                id: fileNameLabel
+                                text: pendingFiles[index].name
+                                font.pixelSize: 11
+                                color: "#555"
+                                elide: Text.ElideMiddle
+                                Layout.fillWidth: true
+                                maximumLineCount: 1
+                            }
+                        }
+
+                        // 关闭按钮
+                        Rectangle {
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.rightMargin: -4
+                            anchors.topMargin: -4
+                            width: 16; height: 16; radius: 8
+                            color: closeBtnArea.containsMouse ? "#ff4d4f" : "#ccc"
+
+                            Label {
+                                anchors.centerIn: parent
+                                text: "\u2715"
+                                font.pixelSize: 9
+                                color: "white"
+                            }
+
+                            MouseArea {
+                                id: closeBtnArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: removePendingFile(index)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // 文本输入区 + 发送按钮
         RowLayout {
             id: inputRow
@@ -71,8 +221,7 @@ Rectangle {
 
             ScrollView {
                 Layout.fillWidth: true
-                Layout.minimumHeight: 36
-                Layout.maximumHeight: 100
+                Layout.fillHeight: true
 
                 TextArea {
                     id: msgInput
@@ -85,7 +234,80 @@ Rectangle {
                         border.color: msgInput.activeFocus ? "#07c160" : "#e0e0e0"
                     }
 
+                    // 右键菜单
+                    MouseArea {
+                        anchors.fill: parent
+                        acceptedButtons: Qt.RightButton
+                        cursorShape: Qt.IBeamCursor
+                        onClicked: function(mouse) {
+                            contextMenu.popup()
+                        }
+                    }
+
+                    Menu {
+                        id: contextMenu
+                        MenuItem {
+                            text: "\u526A\u5207"
+                            enabled: msgInput.selectedText.length > 0
+                            onTriggered: msgInput.cut()
+                        }
+                        MenuItem {
+                            text: "\u590D\u5236"
+                            enabled: msgInput.selectedText.length > 0
+                            onTriggered: msgInput.copy()
+                        }
+                        MenuItem {
+                            text: "\u7C98\u8D34"
+                            onTriggered: {
+                                var clip = HttpClient.getClipboardContent()
+                                if (clip.type === "image") {
+                                    var imgPath = HttpClient.saveClipboardImage()
+                                    if (imgPath.length > 0)
+                                        addPendingFile(imgPath, "image")
+                                } else if (clip.type === "file") {
+                                    var paths = clip.paths
+                                    for (var i = 0; i < paths.length; i++) {
+                                        var p = paths[i]
+                                        addPendingFile(p, isImageFile(p) ? "image" : "file")
+                                    }
+                                } else if (clip.type === "text") {
+                                    msgInput.insert(msgInput.cursorPosition, clip.text)
+                                }
+                            }
+                        }
+                        MenuItem {
+                            text: "\u5168\u9009"
+                            enabled: msgInput.text.length > 0
+                            onTriggered: msgInput.selectAll()
+                        }
+                    }
+
                     Keys.onPressed: function(event) {
+                        // Ctrl+V: 粘贴图片/文件到预览区
+                        if (event.key === Qt.Key_V && (event.modifiers & Qt.ControlModifier)) {
+                            var clip = HttpClient.getClipboardContent()
+                            if (clip.type === "image") {
+                                var imgPath = HttpClient.saveClipboardImage()
+                                if (imgPath.length > 0) {
+                                    event.accepted = true
+                                    addPendingFile(imgPath, "image")
+                                    return
+                                }
+                            } else if (clip.type === "file") {
+                                event.accepted = true
+                                var paths = clip.paths
+                                for (var i = 0; i < paths.length; i++) {
+                                    var p = paths[i]
+                                    if (isImageFile(p))
+                                        addPendingFile(p, "image")
+                                    else
+                                        addPendingFile(p, "file")
+                                }
+                                return
+                            }
+                            // type === "text" 走默认粘贴行为，不拦截
+                        }
+
                         if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                             if (event.modifiers & Qt.ShiftModifier) {
                                 // Shift+Enter: 插入换行
@@ -105,7 +327,7 @@ Rectangle {
                 Layout.preferredHeight: 34
                 text: "\u53D1\u9001"
                 font.pixelSize: 13
-                enabled: msgInput.text.trim().length > 0
+                enabled: msgInput.text.trim().length > 0 || pendingFiles.length > 0
 
                 background: Rectangle {
                     radius: 4
@@ -125,9 +347,21 @@ Rectangle {
     }
 
     function doSend() {
+        // 先发送待发附件
+        for (var i = 0; i < pendingFiles.length; i++) {
+            var f = pendingFiles[i]
+            if (f.type === "image")
+                sendImage(f.path)
+            else
+                sendFile(f.path)
+        }
+        clearPending()
+
+        // 再发送文本
         var text = msgInput.text.trim()
-        if (text.length === 0) return
-        sendText(text)
+        if (text.length > 0) {
+            sendText(text)
+        }
         msgInput.text = ""
     }
 
@@ -137,7 +371,7 @@ Rectangle {
         onAccepted: {
             var path = selectedFile.toString()
             if (path.startsWith("file:///")) path = path.substring(8)
-            chatInput.sendFile(path)
+            addPendingFile(path, isImageFile(path) ? "image" : "file")
         }
     }
 
@@ -148,7 +382,7 @@ Rectangle {
         onAccepted: {
             var path = selectedFile.toString()
             if (path.startsWith("file:///")) path = path.substring(8)
-            chatInput.sendImage(path)
+            addPendingFile(path, "image")
         }
     }
 }

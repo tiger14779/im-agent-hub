@@ -14,6 +14,7 @@
  */
 struct ChatMessage {
     QString clientMsgID;               // 客户端生成的消息ID（UUID）
+    QString serverMsgID;               // 服务器端消息ID
     QString sendID;                    // 发送者用户ID
     QString recvID;                    // 接收者用户ID
     int contentType = 101;             // 消息类型: 101=文本, 102=图片, 103=语音, 105=文件
@@ -41,6 +42,7 @@ public:
     // QML 可访问的角色枚举，对应 delegate 中的 model.xxx 属性
     enum Roles {
         ClientMsgIDRole = Qt::UserRole + 1,  // 客户端消息ID
+        ServerMsgIDRole,                     // 服务器端消息ID
         SendIDRole,                          // 发送者ID
         RecvIDRole,                          // 接收者ID
         ContentTypeRole,                     // 消息类型
@@ -76,7 +78,7 @@ public:
                                            const QString &fileName = {}, qint64 fileSize = 0);
 
     // 更新临时消息的发送状态（1=发送中, 2=已发送, 3=失败）
-    Q_INVOKABLE void updateStatus(const QString &clientMsgID, int status);
+    Q_INVOKABLE void updateStatus(const QString &clientMsgID, int status, const QString &serverMsgID = {});
 
     // 生成唯一消息ID（桥接器发送到非当前会话时使用）
     Q_INVOKABLE QString generateMsgId();
@@ -86,6 +88,9 @@ public:
 
     // 清空所有消息（切换会话时调用）
     Q_INVOKABLE void clear();
+
+    // 根据 serverMsgID 删除消息
+    Q_INVOKABLE void removeMessageByServerMsgID(const QString &serverMsgID);
 
 signals:
     void countChanged();

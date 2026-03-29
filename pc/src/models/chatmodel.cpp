@@ -25,6 +25,7 @@ QVariant ChatModel::data(const QModelIndex &index, int role) const
 
     switch (role) {
     case ClientMsgIDRole: return msg.clientMsgID;
+    case ServerMsgIDRole: return msg.serverMsgID;
     case SendIDRole:      return msg.sendID;
     case RecvIDRole:      return msg.recvID;
     case ContentTypeRole: return msg.contentType;
@@ -44,6 +45,7 @@ QHash<int, QByteArray> ChatModel::roleNames() const
 {
     return {
         { ClientMsgIDRole, "clientMsgID" },
+        { ServerMsgIDRole, "serverMsgID" },
         { SendIDRole,      "sendID" },
         { RecvIDRole,      "recvID" },
         { ContentTypeRole, "contentType" },
@@ -134,13 +136,15 @@ bool ChatModel::hasMessage(const QString &clientMsgID) const
     return false;
 }
 
-void ChatModel::updateStatus(const QString &clientMsgID, int status)
+void ChatModel::updateStatus(const QString &clientMsgID, int status, const QString &serverMsgID)
 {
     for (int i = 0; i < m_messages.size(); ++i) {
         if (m_messages[i].clientMsgID == clientMsgID) {
             m_messages[i].status = status;
+            if (!serverMsgID.isEmpty())
+                m_messages[i].serverMsgID = serverMsgID;
             QModelIndex idx = index(i);
-            emit dataChanged(idx, idx, { StatusRole });
+            emit dataChanged(idx, idx, { StatusRole, ServerMsgIDRole });
             return;
         }
     }
@@ -158,6 +162,7 @@ ChatMessage ChatModel::fromJson(const QJsonObject &obj) const
 {
     ChatMessage m;
     m.clientMsgID = obj["clientMsgID"].toString();
+    m.serverMsgID = obj["serverMsgID"].toString();
     m.sendID = obj["sendID"].toString();
     m.recvID = obj["recvID"].toString();
     m.contentType = obj["contentType"].toInt(101);
@@ -204,4 +209,18 @@ ChatMessage ChatModel::fromJson(const QJsonObject &obj) const
     }
 
     return m;
+}
+
+void ChatModel::removeMessageByServerMsgID(const QString &serverMsgID)
+{
+    if (serverMsgID.isEmpty()) return;
+    for (int i = 0; i < m_messages.size(); ++i) {
+        if (m_messages[i].serverMsgID == serverMsgID) {
+            beginRemoveRows(QModelIndex(), i, i);
+            m_messages.removeAt(i);
+            endRemoveRows();
+            emit countChanged();
+            return;
+        }
+    }
 }
