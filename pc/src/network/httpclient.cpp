@@ -141,6 +141,17 @@ void HttpClient::updateContact(const QString &userId, const QString &nickname, c
         [this](const QString &err) { emit contactError(err); });
 }
 
+void HttpClient::getProfile()
+{
+    QNetworkRequest req = authedRequest("/api/service/profile");
+    QNetworkReply *reply = m_nam.get(req);
+    handleReply(reply,
+        [this](const QJsonObject &resp) {
+            emit profileUpdated(resp["data"].toObject());
+        },
+        [](const QString &err) { qWarning() << "[HttpClient] getProfile error:" << err; });
+}
+
 void HttpClient::updateProfile(const QString &nickname, const QString &avatar)
 {
     QNetworkRequest req = authedRequest("/api/service/profile");

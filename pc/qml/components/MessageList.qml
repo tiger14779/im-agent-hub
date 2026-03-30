@@ -11,6 +11,7 @@ ListView {
 
     property string selfId: ""          // 当前用户ID，用于判断消息方向
     property string peerAvatarUrl: ""   // 对方头像URL
+    property string selfAvatarUrl: ""   // 自己的头像URL
     property string serverUrl: ""       // 服务器地址（用于拼接头像URL）
     property bool loadingMore: false    // 是否正在加载更多历史消息
     property bool hasMore: true         // 是否还有更多历史消息
@@ -158,7 +159,12 @@ ListView {
         sendTime: model.sendTime
         serverMsgId: model.serverMsgID || ""
         clientMsgId: model.clientMsgID || ""
-        avatarUrl: model.isSelf ? "" : (function() {
+        avatarUrl: model.isSelf ? (function() {
+            var url = msgList.selfAvatarUrl || ""
+            if (url.length > 0 && url.charAt(0) === '/')
+                return msgList.serverUrl + url
+            return url
+        })() : (function() {
             var url = msgList.peerAvatarUrl || ""
             if (url.length > 0 && url.charAt(0) === '/')
                 return msgList.serverUrl + url
