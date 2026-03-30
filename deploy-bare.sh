@@ -205,46 +205,6 @@ for i in $(seq 1 15); do
     sleep 2
 done
 
-# ---------- 安装 Caddy（HTTPS 反向代理，手机端麦克风需要） ----------
-if ! command -v caddy &> /dev/null; then
-    info "正在安装 Caddy（HTTPS 反向代理）..."
-    apt-get install -y -qq debian-keyring debian-archive-keyring apt-transport-https > /dev/null
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg 2>/dev/null
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list > /dev/null
-    apt-get update -qq
-    apt-get install -y -qq caddy > /dev/null
-    info "Caddy 安装完成"
-else
-    info "Caddy 已安装: $(caddy version)"
-fi
-
-# ---------- 配置 Caddy HTTPS ----------
-info "配置 Caddy HTTPS 反向代理..."
-mkdir -p /etc/caddy/certs
-if [ ! -f /etc/caddy/certs/cert.pem ]; then
-    SERVER_IP_FOR_CERT=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
-    openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
-      -keyout /etc/caddy/certs/key.pem \
-      -out /etc/caddy/certs/cert.pem \
-      -subj "/CN=${SERVER_IP_FOR_CERT}" \
-      -addext "subjectAltName=IP:${SERVER_IP_FOR_CERT}" 2>/dev/null
-    chown caddy:caddy /etc/caddy/certs/cert.pem /etc/caddy/certs/key.pem
-    chmod 644 /etc/caddy/certs/cert.pem
-    chmod 600 /etc/caddy/certs/key.pem
-    info "自签名证书已生成"
-fi
-
-cat > /etc/caddy/Caddyfile <<CADDYEOF
-:443 {
-    tls /etc/caddy/certs/cert.pem /etc/caddy/certs/key.pem
-    reverse_proxy localhost:${PORT}
-}
-CADDYEOF
-
-systemctl enable --now caddy
-systemctl restart caddy
-info "Caddy HTTPS 代理已启动（端口 443）"
-
 # ---------- 获取服务器IP ----------
 SERVER_IP=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 
@@ -254,9 +214,8 @@ info "=========================================="
 info "  裸机部署完成！"
 info "=========================================="
 echo ""
-info "  H5 客服端(HTTP):   http://${SERVER_IP}:${PORT}"
-info "  H5 客服端(HTTPS):  https://${SERVER_IP}  (手机语音需用此地址)"
-info "  管理后台:           http://${SERVER_IP}:${PORT}/admin/"
+info "  H5 客服端:   http://${SERVER_IP}:${PORT}"
+info "  管理后台:     http://${SERVER_IP}:${PORT}/admin/"
 echo ""
 info "  管理员账号:   admin"
 info "  管理员密码:   admin123"

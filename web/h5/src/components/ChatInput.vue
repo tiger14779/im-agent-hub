@@ -129,14 +129,7 @@ async function startRecord() {
     recordSeconds.value = 0
     recordTimer = setInterval(() => { recordSeconds.value++ }, 1000)
   } catch (err) {
-    const msg = (err as Error).message || '未知错误'
-    if (!window.isSecureContext) {
-      alert('需要 HTTPS 才能使用麦克风，请用 https:// 地址访问')
-    } else if (msg.includes('Permission') || msg.includes('NotAllowed')) {
-      alert('麦克风权限被拒绝，请在浏览器设置中允许麦克风访问')
-    } else {
-      alert('无法访问麦克风: ' + msg)
-    }
+    alert('无法访问麦克风: ' + (err as Error).message)
   }
 }
 
