@@ -54,6 +54,8 @@ public:
     Q_INVOKABLE void addContact(const QString &nickname, const QString &avatar);
     // 更新联系人信息（昵称/头像）: PUT /api/service/contacts/:userId
     Q_INVOKABLE void updateContact(const QString &userId, const QString &nickname, const QString &avatar);
+    // 获取客服自己的个人资料: GET /api/service/profile
+    Q_INVOKABLE void getProfile();
     // 更新客服自己的个人资料: PUT /api/service/profile
     Q_INVOKABLE void updateProfile(const QString &nickname, const QString &avatar);
 

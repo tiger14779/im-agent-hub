@@ -70,6 +70,7 @@ Page {
 
         chatModel.setSelfId(staffUserId)
         HttpClient.getContacts()
+        HttpClient.getProfile()
         WxBridge.startServer()
     }
 
@@ -453,6 +454,7 @@ Page {
                     model: chatModel
                     selfId: staffUserId
                     peerAvatarUrl: contactModel.getAvatar(activeChatId)
+                    selfAvatarUrl: chatRoot.staffAvatarUrl
                     serverUrl: HttpClient.baseUrl
                     loadingMore: chatRoot.loadingMore
                     hasMore: chatRoot.hasMoreHistory
