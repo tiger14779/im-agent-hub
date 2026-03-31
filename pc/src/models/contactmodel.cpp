@@ -24,6 +24,7 @@ QVariant ContactModel::data(const QModelIndex &index, int role) const
     case LastMessageRole: return c.lastMessage;
     case LastTimeRole:    return c.lastTime;
     case UnreadCountRole: return c.unreadCount;
+    case OnlineStatusRole: return c.onlineStatus;
     }
     return {};
 }
@@ -37,6 +38,7 @@ QHash<int, QByteArray> ContactModel::roleNames() const
         { LastMessageRole, "lastMessage" },
         { LastTimeRole,    "lastTime" },
         { UnreadCountRole, "unreadCount" },
+        { OnlineStatusRole, "onlineStatus" },
     };
 }
 
@@ -190,6 +192,25 @@ QString ContactModel::getAvatar(const QString &userId) const
     int idx = findByUserId(userId);
     if (idx < 0) return {};
     return m_contacts[idx].avatarUrl;
+}
+
+QString ContactModel::getOnlineStatus(const QString &userId) const
+{
+    int idx = findByUserId(userId);
+    if (idx < 0) return QStringLiteral("offline");
+    return m_contacts[idx].onlineStatus.isEmpty() ? QStringLiteral("offline") : m_contacts[idx].onlineStatus;
+}
+
+void ContactModel::setOnlineStatus(const QString &userId, const QString &status)
+{
+    int idx = findByUserId(userId);
+    if (idx < 0) return;
+    m_contacts[idx].onlineStatus = status;
+    int fRow = filteredRow(idx);
+    if (fRow >= 0) {
+        QModelIndex mi = index(fRow);
+        emit dataChanged(mi, mi, { OnlineStatusRole });
+    }
 }
 
 QJsonArray ContactModel::toJsonArray() const

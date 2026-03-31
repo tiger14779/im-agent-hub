@@ -3,8 +3,10 @@ import vue from '@vitejs/plugin-vue'
 import basicSsl from '@vitejs/plugin-basic-ssl'
 import { resolve } from 'path'
 
+const useHttps = process.env.VITE_HTTPS === 'true'
+
 export default defineConfig({
-  plugins: [vue(), basicSsl()],
+  plugins: [vue(), ...(useHttps ? [basicSsl()] : [])],
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src')

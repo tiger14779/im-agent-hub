@@ -37,6 +37,11 @@ func Init() {
 		log.Fatalf("failed to auto-migrate: %v", err)
 	}
 
+	// 确保 Content 列为 text 类型（兼容旧迁移可能创建的 varchar(256)）
+	db.Exec("ALTER TABLE messages ALTER COLUMN content TYPE text")
+	// 确保 last_msg_content 列也为 text 类型
+	db.Exec("ALTER TABLE conversations ALTER COLUMN last_msg_content TYPE text")
+
 	DB = db
 
 	seedAdmin()

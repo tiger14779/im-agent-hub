@@ -16,7 +16,9 @@ import (
 )
 
 var wsUpgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
+	CheckOrigin:     func(r *http.Request) bool { return true },
+	ReadBufferSize:  65536,
+	WriteBufferSize: 65536,
 }
 
 const (
@@ -42,11 +44,12 @@ type msgTask struct {
 // ChatConn represents a single WebSocket connection.
 // Each connection has a dedicated write channel + goroutine for serialized writes.
 type ChatConn struct {
-	conn   *websocket.Conn
-	userID string
-	role   string // "client" or "staff"
-	stopCh chan struct{}
-	sendCh chan []byte // buffered outgoing message channel
+	conn       *websocket.Conn
+	userID     string
+	role       string // "client" or "staff"
+	visibility string // "visible" or "hidden" (H5 page visibility)
+	stopCh     chan struct{}
+	sendCh     chan []byte // buffered outgoing message channel
 }
 
 // NewChatHub creates a new ChatHub.
@@ -135,13 +138,16 @@ func (h *ChatHub) upgradeAndServe(c *gin.Context, userID, role string) {
 		conn.SetReadDeadline(time.Now().Add(pongWait))
 		return nil
 	})
+	// 取消默认 32KB 读取限制，允许大消息（默认 32768 会导致长文本断连）
+	conn.SetReadLimit(0)
 
 	cc := &ChatConn{
-		conn:   conn,
-		userID: userID,
-		role:   role,
-		stopCh: make(chan struct{}),
-		sendCh: make(chan []byte, 128), // buffered: avoids blocking senders
+		conn:       conn,
+		userID:     userID,
+		role:       role,
+		visibility: "visible",
+		stopCh:     make(chan struct{}),
+		sendCh:     make(chan []byte, 128), // buffered: avoids blocking senders
 	}
 
 	// Replace existing connection for this user
@@ -175,6 +181,11 @@ func (h *ChatHub) upgradeAndServe(c *gin.Context, userID, role string) {
 
 	log.Printf("[WS] %s (%s) connected", userID, role)
 
+	// Notify staff clients when an H5 client comes online
+	if role == "client" {
+		h.broadcastClientStatus(userID, "online")
+	}
+
 	// Dedicated write goroutine: serialized writes + ping keepalive
 	go h.writeLoop(cc)
 
@@ -191,6 +202,11 @@ func (h *ChatHub) upgradeAndServe(c *gin.Context, userID, role string) {
 	}
 	h.mu.Unlock()
 
+	// Notify staff clients when an H5 client goes offline
+	if role == "client" {
+		h.broadcastClientStatus(userID, "offline")
+	}
+
 	select {
 	case <-cc.stopCh:
 	default:
@@ -204,11 +220,13 @@ func (h *ChatHub) readLoop(cc *ChatConn) {
 	for {
 		_, raw, err := cc.conn.ReadMessage()
 		if err != nil {
+			log.Printf("[WS] readLoop error for %s: %v", cc.userID, err)
 			break
 		}
 
 		var env WsEnvelope
 		if err := json.Unmarshal(raw, &env); err != nil {
+			log.Printf("[WS] envelope parse error from %s (len=%d): %v", cc.userID, len(raw), err)
 			continue
 		}
 
@@ -218,6 +236,21 @@ func (h *ChatHub) readLoop(cc *ChatConn) {
 			case h.msgCh <- msgTask{cc: cc, data: env.Data}:
 			default:
 				log.Printf("[WS] message channel full, dropping message from %s", cc.userID)
+				// 队列满时也要返回失败 ACK，否则客户端只能等超时
+				var partial struct {
+					ClientMsgID string `json:"clientMsgId"`
+				}
+				_ = json.Unmarshal(env.Data, &partial)
+				if partial.ClientMsgID != "" {
+					h.sendJSON(cc, map[string]interface{}{
+						"type": "message_ack",
+						"data": map[string]interface{}{
+							"clientMsgId": partial.ClientMsgID,
+							"status":      3,
+							"error":       "server busy",
+						},
+					})
+				}
 			}
 		case "load_history":
 			h.handleLoadHistory(cc, env.Data)
@@ -228,6 +261,10 @@ func (h *ChatHub) readLoop(cc *ChatConn) {
 		case "ping":
 			cc.conn.SetReadDeadline(time.Now().Add(pongWait))
 			h.sendJSON(cc, map[string]interface{}{"type": "pong"})
+		case "visibility":
+			h.handleVisibility(cc, env.Data)
+		case "query_online":
+			h.handleQueryOnline(cc)
 		}
 	}
 }
@@ -242,6 +279,21 @@ func (h *ChatHub) handleSendMessage(cc *ChatConn, data json.RawMessage) {
 	}
 	if err := json.Unmarshal(data, &req); err != nil {
 		log.Printf("[WS] bad send_message from %s: %v", cc.userID, err)
+		// 解析失败也要返回 ACK，否则客户端会等到超时
+		var partial struct {
+			ClientMsgID string `json:"clientMsgId"`
+		}
+		_ = json.Unmarshal(data, &partial)
+		if partial.ClientMsgID != "" {
+			h.sendToUser(cc.userID, map[string]interface{}{
+				"type": "message_ack",
+				"data": map[string]interface{}{
+					"clientMsgId": partial.ClientMsgID,
+					"status":      3,
+					"error":       "invalid message format",
+				},
+			})
+		}
 		return
 	}
 
@@ -256,7 +308,7 @@ func (h *ChatHub) handleSendMessage(cc *ChatConn, data json.RawMessage) {
 		}
 	}
 
-	log.Printf("[WS] send_message from=%s to=%s type=%d", cc.userID, req.RecvID, req.ContentType)
+	log.Printf("[WS] send_message from=%s to=%s type=%d contentLen=%d", cc.userID, req.RecvID, req.ContentType, len(contentStr))
 
 	// Save to database
 	msg, isDup, err := h.msgSvc.SaveMessage(cc.userID, req.RecvID, req.ContentType, contentStr, req.ClientMsgID)
@@ -505,4 +557,72 @@ func (h *ChatHub) OnlineCount() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.clients)
+}
+
+// broadcastClientStatus sends client_online_status to all connected staff members.
+func (h *ChatHub) broadcastClientStatus(clientUserID, status string) {
+	msg := map[string]interface{}{
+		"type": "client_online_status",
+		"data": map[string]interface{}{
+			"userId": clientUserID,
+			"status": status, // "online", "background", "offline"
+		},
+	}
+	h.mu.RLock()
+	var staffConns []*ChatConn
+	for _, cc := range h.clients {
+		if cc.role == "staff" {
+			staffConns = append(staffConns, cc)
+		}
+	}
+	h.mu.RUnlock()
+
+	for _, cc := range staffConns {
+		h.sendJSON(cc, msg)
+	}
+	log.Printf("[WS] broadcast client_online_status: userId=%s status=%s to %d staff", clientUserID, status, len(staffConns))
+}
+
+// handleVisibility processes visibility change from H5 client (page hidden/visible).
+func (h *ChatHub) handleVisibility(cc *ChatConn, data json.RawMessage) {
+	var req struct {
+		Visible bool `json:"visible"`
+	}
+	if err := json.Unmarshal(data, &req); err != nil {
+		return
+	}
+
+	if req.Visible {
+		cc.visibility = "visible"
+		h.broadcastClientStatus(cc.userID, "online")
+	} else {
+		cc.visibility = "hidden"
+		h.broadcastClientStatus(cc.userID, "background")
+	}
+}
+
+// handleQueryOnline responds with all currently online client users and their status.
+func (h *ChatHub) handleQueryOnline(cc *ChatConn) {
+	h.mu.RLock()
+	var clients []map[string]interface{}
+	for _, c := range h.clients {
+		if c.role == "client" {
+			status := "online"
+			if c.visibility == "hidden" {
+				status = "background"
+			}
+			clients = append(clients, map[string]interface{}{
+				"userId": c.userID,
+				"status": status,
+			})
+		}
+	}
+	h.mu.RUnlock()
+
+	h.sendJSON(cc, map[string]interface{}{
+		"type": "online_list",
+		"data": map[string]interface{}{
+			"clients": clients,
+		},
+	})
 }
