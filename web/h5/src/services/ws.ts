@@ -63,6 +63,7 @@ class ChatWsService {
   private static readonly PING_INTERVAL = 10000 // 10s
   private static readonly STALE_THRESHOLD = 25000 // 25s no response → stale
   private isFirstConnect = true // track first vs reconnect
+  private visibilityHandler: (() => void) | null = null // page visibility listener
 
   /** Pending sends: clientMsgId → full payload + retry state */
   private pendingSends = new Map<string, {
@@ -125,6 +126,7 @@ class ChatWsService {
       this.onConnected()
       this.startPing()
       this.flushPendingSends()
+      this.startVisibilityTracking()
       if (!this.isFirstConnect) {
         // This is a reconnect — notify UI to sync missed messages
         this.onReconnected()
@@ -145,6 +147,7 @@ class ChatWsService {
     this.ws.onclose = () => {
       this.connected = false
       this.stopPing()
+      this.stopVisibilityTracking()
       this.pausePendingTimers()
       this.onDisconnected()
       if (!this.intentionalClose) {
@@ -374,6 +377,7 @@ class ChatWsService {
   disconnect() {
     this.intentionalClose = true
     this.stopPing()
+    this.stopVisibilityTracking()
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
@@ -421,6 +425,22 @@ class ChatWsService {
     if (this.pingTimer) {
       clearInterval(this.pingTimer)
       this.pingTimer = null
+    }
+  }
+
+  private startVisibilityTracking() {
+    this.stopVisibilityTracking()
+    this.visibilityHandler = () => {
+      const visible = !document.hidden
+      this.send('visibility', { visible })
+    }
+    document.addEventListener('visibilitychange', this.visibilityHandler)
+  }
+
+  private stopVisibilityTracking() {
+    if (this.visibilityHandler) {
+      document.removeEventListener('visibilitychange', this.visibilityHandler)
+      this.visibilityHandler = null
     }
   }
 

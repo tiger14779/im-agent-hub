@@ -15,6 +15,7 @@ Page {
     property string serverUrl: ""       // 服务器地址
     property string activeChatId: ""    // 当前打开的会话用户ID
     property string activeChatName: ""  // 当前会话用户昵称
+    property string activeChatOnlineStatus: "" // 当前会话用户在线状态
 
     // 分页状态
     property int oldestSeq: 0            // 当前最旧消息的 seq（用于向上加载更多）
@@ -69,6 +70,7 @@ Page {
         notifySoundEnabled = (saved === "true")
 
         chatModel.setSelfId(staffUserId)
+        MessageCache.init(staffUserId)
         HttpClient.getContacts()
         HttpClient.getProfile()
         WxBridge.startServer()
@@ -426,18 +428,53 @@ Page {
                 spacing: 0
                 visible: activeChatId.length > 0
 
-                // 聊天头部（显示当前会话名称）
+                // 聊天头部（显示当前会话名称 + 在线状态）
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 50
                     color: "#f5f5f5"
 
-                    Label {
+                    RowLayout {
                         anchors.verticalCenter: parent.verticalCenter
                         anchors.left: parent.left
                         anchors.leftMargin: 16
-                        text: activeChatName || activeChatId
-                        font.pixelSize: 15; font.bold: true; color: "#333"
+                        spacing: 8
+
+                        Label {
+                            text: activeChatName || activeChatId
+                            font.pixelSize: 15; font.bold: true; color: "#333"
+                        }
+
+                        // 在线状态指示器
+                        Rectangle {
+                            width: statusRow.implicitWidth + 12
+                            height: 20
+                            radius: 10
+                            visible: activeChatOnlineStatus.length > 0
+                            color: activeChatOnlineStatus === "online" ? "#e8f5e9"
+                                 : activeChatOnlineStatus === "background" ? "#fff3e0" : "#f5f5f5"
+
+                            Row {
+                                id: statusRow
+                                anchors.centerIn: parent
+                                spacing: 4
+
+                                Rectangle {
+                                    width: 8; height: 8; radius: 4
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    color: activeChatOnlineStatus === "online" ? "#4caf50"
+                                         : activeChatOnlineStatus === "background" ? "#ff9800" : "#bdbdbd"
+                                }
+
+                                Label {
+                                    text: activeChatOnlineStatus === "online" ? "在线"
+                                        : activeChatOnlineStatus === "background" ? "后台" : "离线"
+                                    font.pixelSize: 11
+                                    color: activeChatOnlineStatus === "online" ? "#2e7d32"
+                                         : activeChatOnlineStatus === "background" ? "#e65100" : "#757575"
+                                }
+                            }
+                        }
                     }
 
                     Rectangle {
@@ -463,6 +500,7 @@ Page {
                     onDeleteRequested: function(serverMsgId, clientMsgId) {
                         WsClient.deleteMessage(serverMsgId)
                         chatModel.removeMessageByServerMsgID(serverMsgId)
+                        MessageCache.removeMessage(serverMsgId)
                     }
                     onImageViewRequested: function(url) {
                         imageViewer.imageSource = url
@@ -783,12 +821,22 @@ Page {
         console.log("[ChatPage] openChat:", userId, "wsConnected:", WsClient.connected)
         activeChatId = userId
         activeChatName = contactModel.getNickname(userId)
+        activeChatOnlineStatus = contactModel.getOnlineStatus(userId)
         chatModel.clear()
         contactModel.clearUnread(userId)
         oldestSeq = 0
         hasMoreHistory = true
         loadingMore = false
-        // Load history from OpenIM via our backend WS
+
+        // 1) 先从本地 SQLite 缓存加载消息，立即显示（闪现，提升感知速度）
+        var cached = MessageCache.loadMessages(userId, 50)
+        if (cached.length > 0) {
+            console.log("[ChatPage] 从本地缓存加载", cached.length, "条消息")
+            chatModel.prependMessages(cached)
+        }
+
+        // 2) 从服务器拉取完整数据，到达后替换缓存数据（保证顺序正确）
+        _mergeMode = false
         WsClient.loadHistory(userId)
     }
 
@@ -797,6 +845,12 @@ Page {
         var msgId = chatModel.addPendingMessage(activeChatId, 101, text)
         WsClient.sendMessage(activeChatId, 101, content, msgId)
         contactModel.updateLastMessage(activeChatId, text, Date.now())
+        // 保存发送的消息到本地缓存
+        MessageCache.saveMessage({
+            "clientMsgID": msgId, "sendID": staffUserId, "recvID": activeChatId,
+            "contentType": 101, "sendTime": Date.now(), "status": 1,
+            "textElem": {"text": text}, "content": text
+        })
         // Push self-sent event to accounting software
         WxBridge.pushMessageEvent(staffUserId, activeChatId, text, true, 1)
     }
@@ -922,6 +976,11 @@ Page {
                 var imgMsgId = chatModel.addPendingMessage(activeChatId, 102, "", resolveUrl(url))
                 WsClient.sendMessage(activeChatId, 102, imgContent, imgMsgId)
                 contactModel.updateLastMessage(activeChatId, "[\u56FE\u7247]", Date.now())
+                MessageCache.saveMessage({
+                    "clientMsgID": imgMsgId, "sendID": staffUserId, "recvID": activeChatId,
+                    "contentType": 102, "sendTime": Date.now(), "status": 1,
+                    "pictureElem": {"sourcePicture": {"url": resolveUrl(url)}, "bigPicture": {"url": resolveUrl(url)}}
+                })
             } else {
                 // 文件消息 —— 使用 H5 兼容格式 {url, name, size}
                 var fileContent = JSON.stringify({
@@ -930,6 +989,11 @@ Page {
                 var fileMsgId = chatModel.addPendingMessage(activeChatId, 105, "", resolveUrl(url), origName, origSize)
                 WsClient.sendMessage(activeChatId, 105, fileContent, fileMsgId)
                 contactModel.updateLastMessage(activeChatId, "[\u6587\u4EF6]", Date.now())
+                MessageCache.saveMessage({
+                    "clientMsgID": fileMsgId, "sendID": staffUserId, "recvID": activeChatId,
+                    "contentType": 105, "sendTime": Date.now(), "status": 1,
+                    "fileElem": {"fileName": origName, "sourceUrl": resolveUrl(url), "fileSize": origSize}
+                })
             }
         }
 
@@ -1012,6 +1076,9 @@ Page {
                 console.log("[ChatPage] appendMessage done, new count=" + chatModel.count)
             }
 
+            // 保存到本地缓存
+            MessageCache.saveMessage(chatMsg)
+
             // 播放消息提示音（仅收到别人的消息时）
             if (sendID !== staffUserId && chatRoot.notifySoundEnabled) {
                 notifyPlayer.stop()
@@ -1045,6 +1112,8 @@ Page {
         // 发送消息应答：更新发送状态
         function onMessageAck(clientMsgId, status, serverMsgId, sendTime) {
             chatModel.updateStatus(clientMsgId, status, serverMsgId)
+            // 仅更新缓存中的状态字段，保留完整的消息内容
+            MessageCache.updateMessageStatus(clientMsgId, status, serverMsgId, sendTime)
         }
 
         // 历史消息加载完成
@@ -1100,6 +1169,9 @@ Page {
                     oldestSeq = seq
             }
 
+            // 将服务器返回的消息批量保存到本地缓存
+            MessageCache.saveMessages(parsed)
+
             if (_mergeMode) {
                 // 合并模式（重连/定时同步）：仅追加新消息，appendMessage 内置去重
                 // _mergeMode 保持 true 直到操作完成，suppressAutoScroll 绑定此值
@@ -1130,10 +1202,14 @@ Page {
 
         // WS 重连后：同步当前会话的最新消息（合并模式，不清空已有消息）
         function onConnectedChanged() {
-            if (WsClient.connected && activeChatId) {
-                console.log("[ChatPage] WS reconnected, syncing history for", activeChatId)
-                _mergeMode = true
-                WsClient.loadHistory(activeChatId, 0, 50)
+            if (WsClient.connected) {
+                // 查询所有H5客户端的在线状态
+                WsClient.queryOnline()
+                if (activeChatId) {
+                    console.log("[ChatPage] WS reconnected, syncing history for", activeChatId)
+                    _mergeMode = true
+                    WsClient.loadHistory(activeChatId, 0, 50)
+                }
             }
         }
 
@@ -1145,6 +1221,29 @@ Page {
         // 消息被删除（自己或对方删除）
         function onMessageDeleted(serverMsgId) {
             chatModel.removeMessageByServerMsgID(serverMsgId)
+            MessageCache.removeMessage(serverMsgId)
+        }
+
+        // H5客户端在线状态变化
+        function onClientOnlineStatus(userId, status) {
+            console.log("[ChatPage] clientOnlineStatus:", userId, status)
+            contactModel.setOnlineStatus(userId, status)
+            if (userId === activeChatId) {
+                activeChatOnlineStatus = status
+            }
+        }
+
+        // 在线客户端列表响应
+        function onOnlineListReceived(clients) {
+            console.log("[ChatPage] onlineList received:", clients.length, "clients")
+            for (var i = 0; i < clients.length; i++) {
+                var c = clients[i]
+                contactModel.setOnlineStatus(c["userId"], c["status"])
+            }
+            // 更新当前聊天对象的在线状态
+            if (activeChatId.length > 0) {
+                activeChatOnlineStatus = contactModel.getOnlineStatus(activeChatId)
+            }
         }
     }
 
@@ -1157,7 +1256,13 @@ Page {
         function onApiSendText(wxid, msg) {
             console.log("[桥接器] 发送文本到", wxid, ":", msg)
             var content = JSON.stringify({"text": msg})
-            var msgId = chatModel.addPendingMessage(wxid, 101, msg)
+            // 只有目标是当前聊天对象时才插入消息列表，否则仅发送
+            var msgId = ""
+            if (wxid === activeChatId) {
+                msgId = chatModel.addPendingMessage(wxid, 101, msg)
+            } else {
+                msgId = chatModel.generateMsgId()
+            }
             WsClient.sendMessage(wxid, 101, content, msgId)
             contactModel.updateLastMessage(wxid, msg, Date.now())
             // 推送自发消息事件回给财务软件

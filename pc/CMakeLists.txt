@@ -12,6 +12,7 @@ find_package(Qt6 6.7 REQUIRED COMPONENTS
     Network
     WebSockets
     Multimedia
+    Sql
 )
 
 qt_standard_project_setup(REQUIRES 6.7)
@@ -24,6 +25,7 @@ set(SOURCES
     src/network/httpclient.cpp
     src/network/wsclient.cpp
     src/network/wxbridge.cpp
+    src/database/messagecache.cpp
 )
 
 set(HEADERS
@@ -32,6 +34,7 @@ set(HEADERS
     src/network/httpclient.h
     src/network/wsclient.h
     src/network/wxbridge.h
+    src/database/messagecache.h
 )
 
 # ── QML files ────────────────────────────────────────────
@@ -71,12 +74,14 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt6::Network
     Qt6::WebSockets
     Qt6::Multimedia
+    Qt6::Sql
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/models
     ${CMAKE_CURRENT_SOURCE_DIR}/src/network
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/database
 )
 
 # Pass Qt QML import path so the app can find QtMultimedia etc. at runtime

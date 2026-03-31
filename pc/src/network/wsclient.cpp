@@ -133,7 +133,14 @@ void WsClient::doSendMessage(PendingSend &ps)
     envelope["type"] = QStringLiteral("send_message");
     envelope["data"] = data;
 
-    m_ws.sendTextMessage(QJsonDocument(envelope).toJson(QJsonDocument::Compact));
+    QByteArray payload = QJsonDocument(envelope).toJson(QJsonDocument::Compact);
+    qDebug() << "[WsClient] doSendMessage msgId=" << ps.clientMsgId
+             << "payloadSize=" << payload.size() << "connected=" << m_connected
+             << "wsState=" << m_ws.state();
+    qint64 sent = m_ws.sendTextMessage(QString::fromUtf8(payload));
+    if (sent == 0) {
+        qDebug() << "[WsClient] sendTextMessage returned 0! Message may not have been sent.";
+    }
     ps.sentAt = QDateTime::currentMSecsSinceEpoch();
 }
 
@@ -296,6 +303,17 @@ void WsClient::deleteMessage(const QString &serverMsgId)
     m_ws.sendTextMessage(QJsonDocument(envelope).toJson(QJsonDocument::Compact));
 }
 
+void WsClient::queryOnline()
+{
+    if (!m_connected) return;
+
+    QJsonObject envelope;
+    envelope["type"] = QStringLiteral("query_online");
+    envelope["data"] = QJsonObject();
+
+    m_ws.sendTextMessage(QJsonDocument(envelope).toJson(QJsonDocument::Compact));
+}
+
 void WsClient::handleWsMessage(const QJsonObject &envelope)
 {
     QString type = envelope["type"].toString();
@@ -313,6 +331,10 @@ void WsClient::handleWsMessage(const QJsonObject &envelope)
         int status = data["status"].toInt(2);
         QString serverMsgId = data["serverMsgId"].toString();
         qint64 sendTime = static_cast<qint64>(data["sendTime"].toDouble());
+        QString error = data["error"].toString();
+        qDebug() << "[WsClient] message_ack: clientMsgId=" << clientMsgId
+                 << "status=" << status << "serverMsgId=" << serverMsgId
+                 << "sendTime=" << sendTime << "error=" << error;
         emit messageAck(clientMsgId, status, serverMsgId, sendTime);
     } else if (type == "history") {
         QString peerUserId = data["peerUserId"].toString();
@@ -325,5 +347,13 @@ void WsClient::handleWsMessage(const QJsonObject &envelope)
         QString serverMsgId = data["serverMsgId"].toString();
         if (!serverMsgId.isEmpty())
             emit messageDeleted(serverMsgId);
+    } else if (type == "client_online_status") {
+        QString userId = data["userId"].toString();
+        QString status = data["status"].toString();
+        if (!userId.isEmpty())
+            emit clientOnlineStatus(userId, status);
+    } else if (type == "online_list") {
+        QJsonArray clients = data["clients"].toArray();
+        emit onlineListReceived(clients);
     }
 }

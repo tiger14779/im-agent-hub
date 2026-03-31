@@ -137,8 +137,9 @@ func contentPreview(contentType int, content string) string {
 		var obj map[string]interface{}
 		if err := json.Unmarshal([]byte(content), &obj); err == nil {
 			if text, ok := obj["text"].(string); ok {
-				if len(text) > 50 {
-					return text[:50] + "..."
+				runes := []rune(text)
+				if len(runes) > 50 {
+					return string(runes[:50]) + "..."
 				}
 				return text
 			}

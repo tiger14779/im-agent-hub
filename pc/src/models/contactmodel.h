@@ -18,6 +18,7 @@ struct Contact {
     QString lastMessage;  // 最后一条消息预览
     qint64 lastTime = 0;  // 最后消息时间戳
     int unreadCount = 0;  // 未读消息数
+    QString onlineStatus; // 在线状态: "online", "background", "offline"
 };
 
 /**
@@ -41,7 +42,8 @@ public:
         AvatarUrlRole,                   // 头像URL
         LastMessageRole,                 // 最后一条消息
         LastTimeRole,                    // 最后消息时间
-        UnreadCountRole                  // 未读数
+        UnreadCountRole,                 // 未读数
+        OnlineStatusRole                 // 在线状态
     };
 
     explicit ContactModel(QObject *parent = nullptr);
@@ -79,6 +81,10 @@ public:
     Q_INVOKABLE QString getNickname(const QString &userId) const;
     // 获取指定用户的头像URL
     Q_INVOKABLE QString getAvatar(const QString &userId) const;
+    // 获取指定用户的在线状态
+    Q_INVOKABLE QString getOnlineStatus(const QString &userId) const;
+    // 设置指定用户的在线状态
+    Q_INVOKABLE void setOnlineStatus(const QString &userId, const QString &status);
     // 导出联系人列表为 JSON 数组（用于推送给财务软件）
     Q_INVOKABLE QJsonArray toJsonArray() const;
 

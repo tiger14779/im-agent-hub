@@ -45,6 +45,9 @@ public:
     // 删除消息（通过 serverMsgId）
     Q_INVOKABLE void deleteMessage(const QString &serverMsgId);
 
+    // 查询当前所有在线的H5客户端
+    Q_INVOKABLE void queryOnline();
+
 signals:
     void connectedChanged();                                    // 连接状态变化
     // 收到其他用户发来的新消息（经 OpenIM 轮询获取）
@@ -57,6 +60,10 @@ signals:
     void contactsUpdated();
     // 消息被对方删除
     void messageDeleted(const QString &serverMsgId);
+    // H5客户端在线状态变化 (status: "online", "background", "offline")
+    void clientOnlineStatus(const QString &userId, const QString &status);
+    // 在线客户端列表响应
+    void onlineListReceived(const QJsonArray &clients);
     // 连接错误
     void connectionError(const QString &error);
 
