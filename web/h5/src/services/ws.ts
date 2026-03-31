@@ -64,6 +64,7 @@ class ChatWsService {
   private static readonly STALE_THRESHOLD = 25000 // 25s no response → stale
   private isFirstConnect = true // track first vs reconnect
   private visibilityHandler: (() => void) | null = null // page visibility listener
+  private lastVisibilitySent: boolean | null = null // dedupe visibility reports
 
   /** Pending sends: clientMsgId → full payload + retry state */
   private pendingSends = new Map<string, {
@@ -431,16 +432,26 @@ class ChatWsService {
   private startVisibilityTracking() {
     this.stopVisibilityTracking()
     this.visibilityHandler = () => {
-      const visible = !document.hidden
-      this.send('visibility', { visible })
+      this.sendVisibilityIfChanged(false)
     }
     document.addEventListener('visibilitychange', this.visibilityHandler)
+    this.sendVisibilityIfChanged(true)
   }
 
   private stopVisibilityTracking() {
     if (this.visibilityHandler) {
       document.removeEventListener('visibilitychange', this.visibilityHandler)
       this.visibilityHandler = null
+    }
+  }
+
+  private sendVisibilityIfChanged(force: boolean) {
+    const visible = !document.hidden
+    if (!force && this.lastVisibilitySent === visible) {
+      return
+    }
+    if (this.send('visibility', { visible })) {
+      this.lastVisibilitySent = visible
     }
   }
 

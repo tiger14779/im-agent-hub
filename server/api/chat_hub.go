@@ -193,17 +193,20 @@ func (h *ChatHub) upgradeAndServe(c *gin.Context, userID, role string) {
 	h.readLoop(cc)
 
 	// Cleanup
+	removedCurrent := false
 	h.mu.Lock()
 	if h.clients[userID] == cc {
 		delete(h.clients, userID)
+		removedCurrent = true
 		log.Printf("[WS] %s (%s) removed from clients map", userID, role)
 	} else {
 		log.Printf("[WS] %s (%s) cleanup skipped (replaced by newer connection)", userID, role)
 	}
 	h.mu.Unlock()
 
-	// Notify staff clients when an H5 client goes offline
-	if role == "client" {
+	// Notify staff clients when an H5 client goes offline.
+	// If this connection has been replaced by a newer one, skip offline broadcast.
+	if role == "client" && removedCurrent {
 		h.broadcastClientStatus(userID, "offline")
 	}
 
@@ -593,9 +596,15 @@ func (h *ChatHub) handleVisibility(cc *ChatConn, data json.RawMessage) {
 	}
 
 	if req.Visible {
+		if cc.visibility == "visible" {
+			return
+		}
 		cc.visibility = "visible"
 		h.broadcastClientStatus(cc.userID, "online")
 	} else {
+		if cc.visibility == "hidden" {
+			return
+		}
 		cc.visibility = "hidden"
 		h.broadcastClientStatus(cc.userID, "background")
 	}

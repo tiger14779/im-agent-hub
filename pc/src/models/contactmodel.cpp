@@ -205,6 +205,7 @@ void ContactModel::setOnlineStatus(const QString &userId, const QString &status)
 {
     int idx = findByUserId(userId);
     if (idx < 0) return;
+    if (m_contacts[idx].onlineStatus == status) return;
     m_contacts[idx].onlineStatus = status;
     int fRow = filteredRow(idx);
     if (fRow >= 0) {
