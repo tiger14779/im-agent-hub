@@ -89,6 +89,9 @@ public:
     // 清空所有消息（切换会话时调用）
     Q_INVOKABLE void clear();
 
+    // 原子替换所有消息（单次 resetModel，避免 clear+prepend 的中间空状态闪烁）
+    Q_INVOKABLE void replaceAll(const QJsonArray &msgs);
+
     // 根据 serverMsgID 删除消息
     Q_INVOKABLE void removeMessageByServerMsgID(const QString &serverMsgID);
 

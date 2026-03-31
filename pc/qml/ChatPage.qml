@@ -1036,6 +1036,7 @@ Page {
             // 构造 ChatModel 兼容的消息对象
             var chatMsg = {
                 "clientMsgID": msg["clientMsgID"] ?? msg["serverMsgID"] ?? "",
+                "serverMsgID": msg["serverMsgID"] ?? "",
                 "sendID": sendID,
                 "recvID": recvID,
                 "contentType": contentType,
@@ -1137,6 +1138,7 @@ Page {
 
                 var obj = {
                     "clientMsgID": m["clientMsgID"] ?? m["serverMsgID"] ?? "",
+                    "serverMsgID": m["serverMsgID"] ?? "",
                     "sendID": m["sendID"] ?? "",
                     "recvID": m["recvID"] ?? "",
                     "contentType": ct,
@@ -1194,9 +1196,8 @@ Page {
                 chatModel.prependMessages(parsed)
                 loadingMore = false
             } else {
-                // 初次加载：清空后批量插入
-                chatModel.clear()
-                chatModel.prependMessages(parsed)
+                // 初次加载：智能替换（相同结构只更新数据不动布局，不同结构才清空重建）
+                chatModel.replaceAll(parsed)
             }
         }
 

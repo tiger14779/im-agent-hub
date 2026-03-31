@@ -162,6 +162,67 @@ void ChatModel::clear()
     emit countChanged();
 }
 
+void ChatModel::replaceAll(const QJsonArray &msgs)
+{
+    QVector<ChatMessage> newList;
+    newList.reserve(msgs.size());
+    for (const auto &val : msgs)
+        newList.append(fromJson(val.toObject()));
+
+    const int oldSize = m_messages.size();
+    const int newSize = newList.size();
+
+    // Fast path: existing messages are a prefix of (or equal to) new messages
+    // Common case: cache and server return same data, or server has a few extras
+    if (oldSize > 0 && newSize >= oldSize) {
+        bool prefixMatch = true;
+        for (int i = 0; i < oldSize; ++i) {
+            if (newList[i].clientMsgID != m_messages[i].clientMsgID) {
+                prefixMatch = false;
+                break;
+            }
+        }
+        if (prefixMatch) {
+            // Update existing data in place (status/serverMsgID may differ) — no layout change
+            for (int i = 0; i < oldSize; ++i)
+                m_messages[i] = newList[i];
+            emit dataChanged(index(0), index(oldSize - 1));
+
+            // Append any extra messages from server (new msgs arrived during round-trip)
+            if (newSize > oldSize) {
+                beginInsertRows(QModelIndex(), oldSize, newSize - 1);
+                for (int i = oldSize; i < newSize; ++i)
+                    m_messages.append(newList[i]);
+                endInsertRows();
+                emit countChanged();
+            }
+            return;
+        }
+    }
+
+    // Empty model: just insert all
+    if (oldSize == 0 && newSize > 0) {
+        beginInsertRows(QModelIndex(), 0, newSize - 1);
+        m_messages = std::move(newList);
+        endInsertRows();
+        emit countChanged();
+        return;
+    }
+
+    // Slow path: structure differs → clear then insert (same visual as original clear+prependMessages)
+    beginResetModel();
+    m_messages.clear();
+    endResetModel();
+    emit countChanged();
+
+    if (newSize > 0) {
+        beginInsertRows(QModelIndex(), 0, newSize - 1);
+        m_messages = std::move(newList);
+        endInsertRows();
+        emit countChanged();
+    }
+}
+
 ChatMessage ChatModel::fromJson(const QJsonObject &obj) const
 {
     ChatMessage m;
