@@ -7,6 +7,21 @@ import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import App from './App.vue'
 import router from './router'
 
+if (typeof window !== 'undefined' && window.performance) {
+  const perf = window.performance as Performance & {
+    clearMarks?: (markName?: string) => void
+    clearMeasures?: (measureName?: string) => void
+  }
+
+  if (typeof perf.clearMarks !== 'function') {
+    perf.clearMarks = () => {}
+  }
+
+  if (typeof perf.clearMeasures !== 'function') {
+    perf.clearMeasures = () => {}
+  }
+}
+
 const app = createApp(App)
 app.use(createPinia())
 app.use(router)

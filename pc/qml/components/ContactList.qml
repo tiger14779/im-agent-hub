@@ -77,6 +77,7 @@ ListView {
 
                 RowLayout {
                     Layout.fillWidth: true
+                    spacing: 6
 
                     Label {
                         text: model.nickname || model.userId
@@ -86,44 +87,58 @@ ListView {
                         Layout.fillWidth: true
                     }
 
-                    // 时间标签（有最后消息时显示）
+                    Rectangle {
+                        implicitWidth: statusLabel.implicitWidth + 8
+                        implicitHeight: 16
+                        radius: 8
+                        color: statusBackgroundColor(model.onlineStatus)
+                        visible: statusLabel.text.length > 0
+                        Layout.alignment: Qt.AlignVCenter
+
+                        Label {
+                            id: statusLabel
+                            anchors.centerIn: parent
+                            text: statusText(model.onlineStatus)
+                            color: statusTextColor(model.onlineStatus)
+                            font.pixelSize: 9
+                            font.bold: true
+                        }
+                    }
+
+                    Rectangle {
+                        implicitWidth: unreadPillLabel.implicitWidth + 10
+                        implicitHeight: 16
+                        radius: 8
+                        color: "#fa5151"
+                        visible: model.unreadCount > 0
+                        Layout.alignment: Qt.AlignVCenter
+
+                        Label {
+                            id: unreadPillLabel
+                            anchors.centerIn: parent
+                            text: model.unreadCount > 99 ? "99+" : String(model.unreadCount)
+                            color: "white"
+                            font.pixelSize: 9
+                            font.bold: true
+                        }
+                    }
+
                     Label {
                         text: model.lastTime > 0 ? formatTime(model.lastTime) : ""
                         color: "#b0b0b0"
-                        font.pixelSize: 11
+                        font.pixelSize: 10
                         visible: text.length > 0
                     }
                 }
 
-                RowLayout {
+                Label {
+                    text: model.lastMessage || ""
+                    color: "#999"
+                    font.pixelSize: 12
+                    elide: Text.ElideRight
+                    maximumLineCount: 1
                     Layout.fillWidth: true
-
-                    Label {
-                        text: model.lastMessage || ""
-                        color: "#999"
-                        font.pixelSize: 12
-                        elide: Text.ElideRight
-                        maximumLineCount: 1
-                        Layout.fillWidth: true
-                        visible: text.length > 0
-                    }
-
-                    // 未读角标
-                    Rectangle {
-                        width: Math.max(18, unreadLabel.implicitWidth + 8)
-                        height: 18; radius: 9
-                        color: "#fa5151"
-                        visible: model.unreadCount > 0
-
-                        Label {
-                            id: unreadLabel
-                            anchors.centerIn: parent
-                            text: model.unreadCount > 99 ? "99+" : String(model.unreadCount)
-                            color: "white"
-                            font.pixelSize: 10
-                            font.bold: true
-                        }
-                    }
+                    visible: text.length > 0
                 }
             }
         }
@@ -148,5 +163,35 @@ ListView {
                    d.getMinutes().toString().padStart(2, '0')
         }
         return (d.getMonth() + 1) + "/" + d.getDate()
+    }
+
+    function statusText(status) {
+        var text = "离线"
+        if (status === "online") {
+            text = "在线"
+        } else if (status === "background") {
+            text = "后台"
+        }
+        return text
+    }
+
+    function statusBackgroundColor(status) {
+        if (status === "online") {
+            return "#e8f7ee"
+        }
+        if (status === "background") {
+            return "#fff4db"
+        }
+        return "#f1f3f5"
+    }
+
+    function statusTextColor(status) {
+        if (status === "online") {
+            return "#1f9d55"
+        }
+        if (status === "background") {
+            return "#b7791f"
+        }
+        return "#6b7280"
     }
 }
