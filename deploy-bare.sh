@@ -3,14 +3,20 @@
 #  IM Agent Hub 裸机一键部署脚本
 #  适用于全新的 Ubuntu 20.04 / 22.04 / 24.04 服务器
 #  省资源：不依赖 Docker，直接安装 PostgreSQL + Go 编译运行
+#  支持 SSL：可选配置域名 + Nginx + Let's Encrypt 自动 HTTPS
 #
 #  用法（在服务器上执行）：
+#    # 不带域名（HTTP 模式）
 #    curl -fsSL https://raw.githubusercontent.com/tiger14779/im-agent-hub/main/deploy-bare.sh | bash
 #
+#    # 带域名（自动配置 HTTPS）
+#    curl -fsSL https://raw.githubusercontent.com/tiger14779/im-agent-hub/main/deploy-bare.sh | bash -s -- --domain aozhou5a.xyz
+#
 #  部署完成后：
-#    H5 客服端:   http://服务器IP:8080
-#    管理后台:     http://服务器IP:8080/admin/
-#    管理员账号:   admin / admin123
+#    无域名:  http://服务器IP:8080
+#    有域名:  https://你的域名
+#    管理后台: /admin/
+#    管理员账号: admin / admin123
 # ============================================================
 
 set -e
@@ -31,10 +37,24 @@ INSTALL_DIR="/opt/im-agent-hub"
 GO_VERSION="1.21.13"
 NODE_VERSION="18"
 PORT=8080
+DOMAIN=""
+BRANCH="main"
 
 DB_USER="imhub"
 DB_PASS="imhub2024"
 DB_NAME="imhub"
+
+# ---------- 解析参数 ----------
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --domain|-d)
+            DOMAIN="$2"; shift 2 ;;
+        --branch|-b)
+            BRANCH="$2"; shift 2 ;;
+        *)
+            shift ;;
+    esac
+done
 
 # ---------- 检测系统 ----------
 if [ "$(id -u)" -ne 0 ]; then
@@ -109,10 +129,12 @@ fi
 if [ -d "$INSTALL_DIR" ]; then
     info "检测到已有安装，正在更新代码..."
     cd "$INSTALL_DIR"
-    git pull origin main || git pull origin master
+    git fetch origin
+    git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" "origin/$BRANCH"
+    git pull origin "$BRANCH"
 else
     info "正在克隆项目..."
-    git clone "$REPO_URL" "$INSTALL_DIR"
+    git clone -b "$BRANCH" "$REPO_URL" "$INSTALL_DIR"
     cd "$INSTALL_DIR"
 fi
 
@@ -196,6 +218,80 @@ systemctl enable im-agent-hub
 # ---------- 停止旧进程，启动新服务 ----------
 systemctl restart im-agent-hub
 
+# ---------- 配置 Nginx + SSL（如果指定了域名）----------
+if [ -n "$DOMAIN" ]; then
+    info "检测到域名 ${DOMAIN}，开始配置 Nginx + SSL..."
+
+    # 安装 Nginx 和 Certbot
+    if ! command -v nginx &> /dev/null; then
+        info "正在安装 Nginx..."
+        apt-get install -y -qq nginx > /dev/null
+        systemctl enable --now nginx
+    fi
+
+    if ! command -v certbot &> /dev/null; then
+        info "正在安装 Certbot..."
+        apt-get install -y -qq certbot python3-certbot-nginx > /dev/null
+    fi
+
+    # 生成 Nginx 配置
+    info "写入 Nginx 配置..."
+    cat > "/etc/nginx/sites-available/${DOMAIN}" <<NGINXEOF
+server {
+    listen 80;
+    server_name ${DOMAIN} www.${DOMAIN};
+
+    client_max_body_size 50m;
+
+    location / {
+        proxy_pass http://127.0.0.1:${PORT};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    location /api/ws {
+        proxy_pass http://127.0.0.1:${PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_read_timeout 86400s;
+    }
+
+    location /api/service/ws {
+        proxy_pass http://127.0.0.1:${PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_read_timeout 86400s;
+    }
+}
+NGINXEOF
+
+    # 启用站点
+    ln -sf "/etc/nginx/sites-available/${DOMAIN}" /etc/nginx/sites-enabled/
+    rm -f /etc/nginx/sites-enabled/default
+
+    # 测试并重载 Nginx
+    nginx -t || error "Nginx 配置错误"
+    systemctl reload nginx
+
+    # 申请 SSL 证书
+    info "正在申请 Let's Encrypt SSL 证书..."
+    certbot --nginx -d "${DOMAIN}" -d "www.${DOMAIN}" --non-interactive --agree-tos --register-unsafely-without-email --redirect
+
+    info "SSL 证书申请成功！"
+    info "自动续期已启用（certbot.timer）"
+
+    # 验证续期定时器
+    systemctl enable --now certbot.timer 2>/dev/null || true
+fi
+
 # ---------- 等待服务就绪 ----------
 info "等待服务启动..."
 for i in $(seq 1 15); do
@@ -214,8 +310,14 @@ info "=========================================="
 info "  裸机部署完成！"
 info "=========================================="
 echo ""
-info "  H5 客服端:   http://${SERVER_IP}:${PORT}"
-info "  管理后台:     http://${SERVER_IP}:${PORT}/admin/"
+if [ -n "$DOMAIN" ]; then
+    info "  H5 客服端:   https://${DOMAIN}"
+    info "  管理后台:     https://${DOMAIN}/admin/"
+    info "  SSL 证书:     Let's Encrypt（自动续期）"
+else
+    info "  H5 客服端:   http://${SERVER_IP}:${PORT}"
+    info "  管理后台:     http://${SERVER_IP}:${PORT}/admin/"
+fi
 echo ""
 info "  管理员账号:   admin"
 info "  管理员密码:   admin123"
@@ -225,7 +327,11 @@ info "    查看状态:   systemctl status im-agent-hub"
 info "    查看日志:   journalctl -u im-agent-hub -f"
 info "    重启服务:   systemctl restart im-agent-hub"
 info "    停止服务:   systemctl stop im-agent-hub"
-info "    更新部署:   cd ${INSTALL_DIR} && git pull && bash deploy-bare.sh"
+info "    更新部署:   cd ${INSTALL_DIR} && git pull && bash deploy-bare.sh${DOMAIN:+ --domain $DOMAIN}"
+if [ -n "$DOMAIN" ]; then
+    info "    SSL 状态:   certbot certificates"
+    info "    Nginx 日志: tail -f /var/log/nginx/access.log"
+fi
 echo ""
 info "  资源占用（比 Docker 方式省约 200-300MB 内存）"
 echo ""
