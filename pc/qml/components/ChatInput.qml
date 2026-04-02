@@ -18,6 +18,42 @@ Rectangle {
     signal sendImage(string filePath)  // 发送图片
 
     // 待发送的附件列表: [{path, type, name}]  type: "image" | "file"
+
+    // ── 拖入文件/图片到聊天框 ──
+    DropArea {
+        anchors.fill: parent
+        keys: ["text/uri-list"]
+        onDropped: function(drop) {
+            if (drop.hasUrls) {
+                for (var i = 0; i < drop.urls.length; i++) {
+                    var path = drop.urls[i].toString()
+                    if (path.startsWith("file:///"))
+                        path = path.substring(8)
+                    addPendingFile(path, isImageFile(path) ? "image" : "file")
+                }
+                drop.accept()
+            }
+        }
+
+        // 拖入时的视觉反馈矩形
+        Rectangle {
+            anchors.fill: parent
+            color: "#07c16020"
+            border.color: "#07c160"
+            border.width: 2
+            radius: 6
+            visible: parent.containsDrag
+            z: 100
+
+            Label {
+                anchors.centerIn: parent
+                text: "松开以添加文件"
+                color: "#07c160"
+                font.pixelSize: 16
+                font.bold: true
+            }
+        }
+    }
     property var pendingFiles: []
 
     function addPendingFile(path, type) {

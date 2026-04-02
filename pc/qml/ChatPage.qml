@@ -620,6 +620,23 @@ Page {
                 id: newNickname
                 placeholderText: "\u6635\u79F0 (\u5FC5\u586B)"
                 Layout.fillWidth: true
+
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.RightButton
+                    cursorShape: Qt.IBeamCursor
+                    onClicked: function(mouse) {
+                        newNicknameMenu.popup()
+                    }
+                }
+
+                Menu {
+                    id: newNicknameMenu
+                    MenuItem {
+                        text: "\u7C98\u8D34"
+                        onTriggered: newNickname.paste()
+                    }
+                }
             }
         }
 
@@ -729,6 +746,23 @@ Page {
                 id: editRemarkField
                 placeholderText: "\u6635\u79F0"
                 Layout.fillWidth: true
+
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.RightButton
+                    cursorShape: Qt.IBeamCursor
+                    onClicked: function(mouse) {
+                        editRemarkMenu.popup()
+                    }
+                }
+
+                Menu {
+                    id: editRemarkMenu
+                    MenuItem {
+                        text: "\u7C98\u8D34"
+                        onTriggered: editRemarkField.paste()
+                    }
+                }
             }
             // 隐藏字段：保存原始头像URL供引用
             TextField {
@@ -800,6 +834,23 @@ Page {
                 placeholderText: "客服昵称"
                 text: staffNickname
                 Layout.fillWidth: true
+
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.RightButton
+                    cursorShape: Qt.IBeamCursor
+                    onClicked: function(mouse) {
+                        profileNicknameMenu.popup()
+                    }
+                }
+
+                Menu {
+                    id: profileNicknameMenu
+                    MenuItem {
+                        text: "\u7C98\u8D34"
+                        onTriggered: profileNicknameField.paste()
+                    }
+                }
             }
         }
 

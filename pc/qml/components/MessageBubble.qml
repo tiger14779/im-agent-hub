@@ -220,10 +220,30 @@ Item {
                                 bubble.imageLoaded()
                         }
 
-                        // 双击放大查看
+                        // 双击放大查看 / 拖拽保存到电脑
                         MouseArea {
                             anchors.fill: parent
                             acceptedButtons: Qt.LeftButton | Qt.RightButton
+                            property point pressPos: Qt.point(0, 0)
+                            property bool dragging: false
+
+                            onPressed: function(mouse) {
+                                pressPos = Qt.point(mouse.x, mouse.y)
+                                dragging = false
+                            }
+                            onPositionChanged: function(mouse) {
+                                if (!dragging && (mouse.buttons & Qt.LeftButton)) {
+                                    var dx = mouse.x - pressPos.x
+                                    var dy = mouse.y - pressPos.y
+                                    if (Math.sqrt(dx*dx + dy*dy) > 10) {
+                                        dragging = true
+                                        if (imageUrl.length > 0) {
+                                            var ext = imageUrl.split(".").pop()
+                                            HttpClient.startFileDrag(imageUrl, "image." + ext)
+                                        }
+                                    }
+                                }
+                            }
                             onDoubleClicked: {
                                 if (imageUrl.length > 0)
                                     bubble.imageViewRequested(imageUrl)
@@ -329,6 +349,25 @@ Item {
                             cursorShape: Qt.PointingHandCursor
                             hoverEnabled: true
                             acceptedButtons: Qt.LeftButton
+                            property point pressPos: Qt.point(0, 0)
+                            property bool dragging: false
+
+                            onPressed: function(mouse) {
+                                pressPos = Qt.point(mouse.x, mouse.y)
+                                dragging = false
+                            }
+                            onPositionChanged: function(mouse) {
+                                if (!dragging && (mouse.buttons & Qt.LeftButton)) {
+                                    var dx = mouse.x - pressPos.x
+                                    var dy = mouse.y - pressPos.y
+                                    if (Math.sqrt(dx*dx + dy*dy) > 10) {
+                                        dragging = true
+                                        if (imageUrl && imageUrl.length > 0) {
+                                            HttpClient.startFileDrag(imageUrl, fileName || "download")
+                                        }
+                                    }
+                                }
+                            }
                             onDoubleClicked: {
                                 if (imageUrl && imageUrl.length > 0) {
                                     HttpClient.downloadAndOpen(imageUrl, fileName || "download")

@@ -81,6 +81,9 @@ public:
     // 下载远程文件后复制到系统剪贴板（可粘贴到资源管理器）
     Q_INVOKABLE void copyFileToClipboard(const QString &url, const QString &fileName);
 
+    // 下载远程文件后启动系统拖放操作（拖到资源管理器可保存）
+    Q_INVOKABLE void startFileDrag(const QString &url, const QString &fileName);
+
     // === 设置（持久化） ===
     // 保存登录配置到本地（userId + serverUrl），下次启动自动填充
     Q_INVOKABLE void saveLoginConfig(const QString &userId, const QString &serverUrl);
@@ -123,6 +126,8 @@ private:
                      std::function<void(const QString &)> onError);
     // 构造带 Token 和 ServiceUserID 的认证请求头
     QNetworkRequest authedRequest(const QString &path) const;
+    // 执行系统拖放操作
+    void performDrag(const QString &localPath);
 
     QNetworkAccessManager m_nam;   // Qt 网络访问管理器
     QString m_baseUrl;             // 服务器基础地址

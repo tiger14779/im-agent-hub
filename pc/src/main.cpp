@@ -8,6 +8,10 @@
 #include <QFile>
 #include <QDateTime>
 #include <QMutex>
+#include <QSharedMemory>
+#include <QLocalServer>
+#include <QLocalSocket>
+#include <QWindow>
 
 // 全局日志文件，将 qDebug 输出重定向到文件
 static QFile *g_logFile = nullptr;
@@ -32,12 +36,72 @@ void fileMessageHandler(QtMsgType type, const QMessageLogContext &ctx, const QSt
     g_logFile->flush();
 }
 
+static const char *kAppKey = "ImAgentHub_SingleInstance_Key";
+static const char *kServerName = "ImAgentHub_LocalServer";
+
+// 尝试通知已有实例显示窗口，成功返回 true（说明已有实例在运行）
+static bool notifyRunningInstance()
+{
+    QLocalSocket socket;
+    socket.connectToServer(kServerName);
+    if (socket.waitForConnected(500)) {
+        socket.write("show");
+        socket.waitForBytesWritten(500);
+        socket.disconnectFromServer();
+        return true;
+    }
+    return false;
+}
+
+// 将所有窗口提到前台显示
+static void raiseAllWindows()
+{
+    const auto windows = QGuiApplication::allWindows();
+    for (QWindow *w : windows) {
+        if (w->isVisible()) {
+            w->showNormal();
+            w->raise();
+            w->requestActivate();
+        }
+    }
+}
+
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
     app.setApplicationName("IM Agent Hub");
     app.setOrganizationName("ImAgentHub");
     app.setApplicationVersion("1.0.0");
+
+    // ── 单实例互斥检测 ──
+    QSharedMemory sharedMem(kAppKey);
+    if (!sharedMem.create(1)) {
+        // 共享内存已存在 → 已有实例在运行，通知它显示窗口后退出
+        if (notifyRunningInstance()) {
+            qDebug() << "已有实例在运行，通知其显示窗口后退出";
+            return 0;
+        }
+        // 若通知失败（可能上次异常退出残留共享内存），清理后继续
+        sharedMem.attach();
+        sharedMem.detach();
+        sharedMem.create(1);
+    }
+
+    // ── 本地服务器：接收第二个实例的 "show" 消息 ──
+    QLocalServer::removeServer(kServerName);
+    QLocalServer localServer;
+    localServer.listen(kServerName);
+    QObject::connect(&localServer, &QLocalServer::newConnection, [&localServer]() {
+        QLocalSocket *client = localServer.nextPendingConnection();
+        if (!client) return;
+        QObject::connect(client, &QLocalSocket::readyRead, [client]() {
+            QByteArray data = client->readAll();
+            if (data == "show") {
+                raiseAllWindows();
+            }
+            client->deleteLater();
+        });
+    });
 
     // 将 qDebug 输出重定向到与 exe 同目录的日志文件
     g_logFile = new QFile(QCoreApplication::applicationDirPath() + "/pc_debug.log");

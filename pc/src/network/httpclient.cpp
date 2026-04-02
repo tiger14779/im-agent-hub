@@ -17,6 +17,8 @@
 #include <QImage>
 #include <QUuid>
 #include <QDateTime>
+#include <QDrag>
+#include <QWindow>
 
 HttpClient::HttpClient(QObject *parent)
     : QObject(parent)
@@ -480,6 +482,59 @@ void HttpClient::downloadToPath(const QString &url, const QString &savePath)
 
         emit downloadFinished(savePath);
     });
+}
+
+// ── 拖放操作 ─────────────────────────────────────────────
+
+void HttpClient::startFileDrag(const QString &url, const QString &fileName)
+{
+    if (url.isEmpty()) return;
+
+    QString fullUrl = url;
+    if (url.startsWith('/'))
+        fullUrl = m_baseUrl + url;
+
+    QString saveName = fileName.isEmpty() ? "download" : fileName;
+    QString savePath = m_tempDir.filePath(saveName);
+
+    // 如果文件已缓存在本地，直接启动拖放
+    if (QFile::exists(savePath)) {
+        performDrag(savePath);
+        return;
+    }
+
+    // 否则先下载到临时目录
+    QNetworkRequest req{QUrl{fullUrl}};
+    QNetworkReply *reply = m_nam.get(req);
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply, savePath]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            qWarning() << "[Drag] download failed:" << reply->errorString();
+            return;
+        }
+        QFile file(savePath);
+        if (!file.open(QIODevice::WriteOnly)) {
+            qWarning() << "[Drag] cannot write:" << savePath;
+            return;
+        }
+        file.write(reply->readAll());
+        file.close();
+
+        performDrag(savePath);
+    });
+}
+
+void HttpClient::performDrag(const QString &localPath)
+{
+    auto *window = qobject_cast<QWindow*>(QGuiApplication::focusWindow());
+    if (!window) return;
+
+    QDrag *drag = new QDrag(window);
+    QMimeData *mimeData = new QMimeData();
+    mimeData->setUrls({QUrl::fromLocalFile(localPath)});
+    drag->setMimeData(mimeData);
+    drag->exec(Qt::CopyAction);
 }
 
 // ── 内部工具方法 ────────────────────────────────────────
