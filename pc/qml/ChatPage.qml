@@ -681,9 +681,7 @@ Page {
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
                             var link = HttpClient.baseUrl + "/chat?id=" + contextUserId
-                            clipHelper.text = link
-                            clipHelper.selectAll()
-                            clipHelper.copy()
+                            HttpClient.copyLinkAsFile(link)
                             copiedTip.visible = true
                             copiedTimer.restart()
                         }

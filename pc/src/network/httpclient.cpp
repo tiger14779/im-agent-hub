@@ -407,6 +407,30 @@ void HttpClient::copyFileToClipboard(const QString &url, const QString &fileName
     });
 }
 
+void HttpClient::copyLinkAsFile(const QString &link)
+{
+    if (link.isEmpty()) return;
+
+    // 在临时目录下创建 txt 子目录
+    QString txtDir = m_tempDir.filePath("txt");
+    QDir().mkpath(txtDir);
+
+    QString filePath = txtDir + "/\u94FE\u63A5.txt";
+    QFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        qWarning() << "[Clipboard] cannot write link file:" << filePath;
+        return;
+    }
+    file.write(link.toUtf8());
+    file.close();
+
+    // 将文件放到剪贴板
+    QMimeData *mimeData = new QMimeData();
+    mimeData->setUrls({QUrl::fromLocalFile(filePath)});
+    QGuiApplication::clipboard()->setMimeData(mimeData);
+    qDebug() << "[Clipboard] link file copied:" << filePath;
+}
+
 // ── 文件下载 ─────────────────────────────────────────────
 
 void HttpClient::downloadAndOpen(const QString &url, const QString &fileName)

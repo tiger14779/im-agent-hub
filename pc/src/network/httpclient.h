@@ -80,6 +80,8 @@ public:
     Q_INVOKABLE QString saveClipboardImage();
     // 下载远程文件后复制到系统剪贴板（可粘贴到资源管理器）
     Q_INVOKABLE void copyFileToClipboard(const QString &url, const QString &fileName);
+    // 将链接保存为 txt 文件并复制文件到剪贴板
+    Q_INVOKABLE void copyLinkAsFile(const QString &link);
 
     // 下载远程文件后启动系统拖放操作（拖到资源管理器可保存）
     Q_INVOKABLE void startFileDrag(const QString &url, const QString &fileName);
