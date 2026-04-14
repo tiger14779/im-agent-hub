@@ -245,3 +245,73 @@ func (s *MessageService) CleanupOldMessages(retentionDays int) (int64, error) {
 	log.Printf("[Cleanup] deleted %d messages older than %d days", result.RowsAffected, retentionDays)
 	return result.RowsAffected, nil
 }
+
+// SaveGroupMessage persists a group message.
+// ConversationID = "group_" + groupID; FOR UPDATE lock ensures monotone seq.
+// Returns the saved message, isDup bool, and error.
+func (s *MessageService) SaveGroupMessage(sendID, groupID string, contentType int, content, clientMsgID, senderName string) (*model.Message, bool, error) {
+	// Dedup
+	if clientMsgID != "" {
+		var existing model.Message
+		if err := database.DB.Where("client_msg_id = ?", clientMsgID).First(&existing).Error; err == nil {
+			log.Printf("[MsgSvc] group dedup hit: clientMsgID=%s (seq=%d)", clientMsgID, existing.Seq)
+			return &existing, true, nil
+		}
+	}
+
+	convID := "group_" + groupID
+	now := time.Now().UnixMilli()
+	serverMsgID := generateServerMsgID()
+
+	msg := &model.Message{
+		ClientMsgID:    clientMsgID,
+		ServerMsgID:    serverMsgID,
+		ConversationID: convID,
+		SendID:         sendID,
+		RecvID:         groupID,
+		ContentType:    contentType,
+		Content:        content,
+		SendTime:       now,
+		Status:         2,
+		IsGroup:        true,
+		SenderName:     senderName,
+	}
+
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		// Ensure group conversation row exists
+		conv := model.Conversation{
+			ID:      convID,
+			GroupID: groupID,
+		}
+		if err := tx.FirstOrCreate(&conv, "id = ?", convID).Error; err != nil {
+			return fmt.Errorf("ensure group conversation: %w", err)
+		}
+
+		// Lock the conversation row for seq assignment
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&conv, "id = ?", convID).Error; err != nil {
+			return fmt.Errorf("lock group conversation: %w", err)
+		}
+
+		nextSeq := conv.LastSeq + 1
+		msg.Seq = nextSeq
+
+		if err := tx.Create(msg).Error; err != nil {
+			return fmt.Errorf("save group message: %w", err)
+		}
+
+		preview := contentPreview(contentType, content)
+		if err := tx.Model(&model.Conversation{}).Where("id = ?", convID).Updates(map[string]interface{}{
+			"last_msg_content": preview,
+			"last_msg_time":    now,
+			"last_seq":         nextSeq,
+		}).Error; err != nil {
+			return fmt.Errorf("update group conversation: %w", err)
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, false, err
+	}
+	return msg, false, nil
+}

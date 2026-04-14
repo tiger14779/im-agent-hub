@@ -43,6 +43,8 @@ set(QML_FILES
     qml/LoginPage.qml
     qml/ChatPage.qml
     qml/components/ContactList.qml
+    qml/components/GroupInfoDrawer.qml
+    qml/components/InviteMemberDialog.qml
     qml/components/MessageList.qml
     qml/components/ChatInput.qml
     qml/components/MessageBubble.qml

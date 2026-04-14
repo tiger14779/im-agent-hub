@@ -27,6 +27,10 @@
           <el-icon><Service /></el-icon>
           <template #title>客服管理</template>
         </el-menu-item>
+        <el-menu-item index="/admin/groups">
+          <el-icon><ChatDotSquare /></el-icon>
+          <template #title>群组管理</template>
+        </el-menu-item>
         <el-menu-item index="/admin/settings">
           <el-icon><Setting /></el-icon>
           <template #title>系统设置</template>
@@ -68,7 +72,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import {
   Odometer, User, Service, Setting, ChatDotRound,
-  Avatar, SwitchButton, Fold, Expand
+  Avatar, SwitchButton, Fold, Expand, ChatDotSquare
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 

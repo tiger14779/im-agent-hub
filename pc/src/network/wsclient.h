@@ -38,6 +38,9 @@ public:
     // 通过 WS 发送聊天消息（由服务端转发到 OpenIM）
     Q_INVOKABLE void sendMessage(const QString &recvId, int contentType,
                                   const QString &content, const QString &clientMsgId);
+    // 通过 WS 发送群聊消息
+    Q_INVOKABLE void sendGroupMessage(const QString &groupId, int contentType,
+                                       const QString &content, const QString &clientMsgId);
 
     // 加载与某个用户的历史聊天记录（支持分页）
     Q_INVOKABLE void loadHistory(const QString &peerUserId, qint64 beforeSeq = 0, int limit = 50);
@@ -66,6 +69,14 @@ signals:
     void onlineListReceived(const QJsonArray &clients);
     // 连接错误
     void connectionError(const QString &error);
+    // 群消息接收（isdGroup=true 的新消息）
+    void newGroupMessage(const QJsonObject &message);
+    // 群成员被添加 (groupId, userId, nickname)
+    void groupMemberAdded(const QString &groupId, const QString &userId, const QString &nickname);
+    // 群成员被移除 (groupId, userId)
+    void groupMemberRemoved(const QString &groupId, const QString &userId);
+    // 群解散 (groupId)
+    void groupDissolved(const QString &groupId);
 
 private slots:
     void onConnected();                                 // WS 连接成功

@@ -45,6 +45,8 @@ interface ServerMessage {
   sendTime: number
   seq: number
   status: number
+  isGroup?: boolean
+  senderName?: string
 }
 
 type Envelope = { type: string; data: unknown }
@@ -83,6 +85,9 @@ class ChatWsService {
   onDisconnected: () => void = () => {}
   onReconnected: () => void = () => {} // fires only on reconnect (not first connect)
   onMessageDeleted: (serverMsgId: string) => void = () => {} // message deleted by peer
+  onGroupMemberAdded: (groupId: string, userId: string, nickname: string) => void = () => {}
+  onGroupMemberRemoved: (groupId: string, userId: string) => void = () => {}
+  onGroupDissolved: (groupId: string) => void = () => {}
 
   /** Build the WebSocket URL based on current page origin */
   private buildWsUrl(): string {
@@ -188,6 +193,21 @@ class ChatWsService {
         if (d.serverMsgId) this.onMessageDeleted(d.serverMsgId)
         break
       }
+      case 'group_member_added': {
+        const d = env.data as { groupId: string; userId: string; nickname: string }
+        this.onGroupMemberAdded(d.groupId, d.userId, d.nickname)
+        break
+      }
+      case 'group_member_removed': {
+        const d = env.data as { groupId: string; userId: string }
+        this.onGroupMemberRemoved(d.groupId, d.userId)
+        break
+      }
+      case 'group_dissolved': {
+        const d = env.data as { groupId: string }
+        this.onGroupDissolved(d.groupId)
+        break
+      }
       default:
         console.log('[WS] unknown type', env.type)
     }
@@ -206,7 +226,9 @@ class ChatWsService {
       contentType,
       content,
       sendTime: raw.sendTime,
-      status: raw.status || 2
+      status: raw.status || 2,
+      isGroup: raw.isGroup,
+      senderName: raw.senderName
     }
 
     // Parse content JSON into typed fields

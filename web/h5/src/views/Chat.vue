@@ -18,6 +18,11 @@
       <!-- Lottery result -->
       <LotteryResult />
 
+      <!-- Group banner notification -->
+      <div v-if="groupBanner" class="group-banner">
+        {{ groupBanner }}
+      </div>
+
       <!-- Header -->
       <header class="chat-header">
         <button class="back-btn" @click="onBackClick">‹</button>
@@ -87,6 +92,7 @@ const errorMsg = ref('')
 const serviceUserName = ref('客服')
 const loadingMore = ref(false)
 const oldestSeq = ref(0)
+const groupBanner = ref('')   // 群组通知横幅（被踢出 / 群解散）
 let isSyncing = false // flag: true when reloading history after reconnect
 
 /* ---- Back-navigation guard ---- */
@@ -193,6 +199,16 @@ async function init() {
 
     chatWs.onMessageDeleted = (serverMsgId: string) => {
       chatStore.removeMessageByServerMsgID(serverMsgId)
+    }
+
+    chatWs.onGroupMemberRemoved = (groupId: string, userId: string) => {
+      if (userId === userStore.userId) {
+        groupBanner.value = '您已被移出群聊'
+      }
+    }
+
+    chatWs.onGroupDissolved = (_groupId: string) => {
+      groupBanner.value = '该群聊已解散'
     }
 
     chatWs.onHistory = (data) => {
@@ -415,5 +431,16 @@ onUnmounted(() => {
 }
 .fade-enter-from, .fade-leave-to {
   opacity: 0;
+}
+.group-banner {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #fff3cd;
+  color: #856404;
+  text-align: center;
+  padding: 8px 16px;
+  font-size: 13px;
+  border-bottom: 1px solid #ffc107;
 }
 </style>

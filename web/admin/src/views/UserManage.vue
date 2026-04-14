@@ -160,7 +160,7 @@ const openEditDialog = (user: User) => {
   formVisible.value = true
 }
 
-const handleFormSubmit = async (formData: { nickname: string; serviceUserId: string; avatar?: string }) => {
+const handleFormSubmit = async (formData: { nickname: string; groupNickname: string; serviceUserId: string; avatar?: string }) => {
   try {
     if (editingUser.value) {
       await updateUser(editingUser.value.id, formData)

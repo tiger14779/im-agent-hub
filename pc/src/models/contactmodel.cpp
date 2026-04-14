@@ -25,6 +25,8 @@ QVariant ContactModel::data(const QModelIndex &index, int role) const
     case LastTimeRole:    return c.lastTime;
     case UnreadCountRole: return c.unreadCount;
     case OnlineStatusRole: return c.onlineStatus;
+    case IsGroupRole:     return c.isGroup;
+    case MemberCountRole: return c.memberCount;
     }
     return {};
 }
@@ -39,10 +41,12 @@ QHash<int, QByteArray> ContactModel::roleNames() const
         { LastTimeRole,    "lastTime" },
         { UnreadCountRole, "unreadCount" },
         { OnlineStatusRole, "onlineStatus" },
+        { IsGroupRole,     "isGroup" },
+        { MemberCountRole, "memberCount" },
     };
 }
 
-void ContactModel::loadFromJson(const QJsonArray &arr)
+void ContactModel::loadFromJson(const QJsonArray &arr, bool isGroup)
 {
     beginResetModel();
     m_contacts.clear();
@@ -55,6 +59,12 @@ void ContactModel::loadFromJson(const QJsonArray &arr)
         c.unreadCount = obj["unreadCount"].toInt(0);
         c.lastMessage = obj["lastMessage"].toString();
         c.lastTime = static_cast<qint64>(obj["lastTime"].toDouble(0));
+        c.isGroup = isGroup;
+        if (isGroup) {
+            c.userId = obj["id"].toString();
+            c.nickname = obj["name"].toString();
+            c.memberCount = obj["memberCount"].toInt(0);
+        }
         m_contacts.append(c);
     }
     rebuildFilter();
@@ -226,6 +236,18 @@ QJsonArray ContactModel::toJsonArray() const
         arr.append(obj);
     }
     return arr;
+}
+
+void ContactModel::updateMemberCount(const QString &groupId, int count)
+{
+    int idx = findByUserId(groupId);
+    if (idx < 0) return;
+    m_contacts[idx].memberCount = count;
+    int fRow = filteredRow(idx);
+    if (fRow >= 0) {
+        QModelIndex mi = index(fRow);
+        emit dataChanged(mi, mi, { MemberCountRole });
+    }
 }
 
 int ContactModel::findByUserId(const QString &userId) const

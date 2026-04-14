@@ -113,11 +113,12 @@ void HttpClient::getContacts()
         [this](const QString &err) { emit contactError(err); });
 }
 
-void HttpClient::addContact(const QString &nickname, const QString &avatar)
+void HttpClient::addContact(const QString &nickname, const QString &groupNickname, const QString &avatar)
 {
     QNetworkRequest req = authedRequest("/api/service/contacts");
     QJsonObject body;
     body["nickname"] = nickname;
+    body["groupNickname"] = groupNickname;
     if (!avatar.isEmpty()) body["avatar"] = avatar;
 
     QNetworkReply *reply = m_nam.post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
@@ -128,11 +129,12 @@ void HttpClient::addContact(const QString &nickname, const QString &avatar)
         [this](const QString &err) { emit contactError(err); });
 }
 
-void HttpClient::updateContact(const QString &userId, const QString &nickname, const QString &avatar)
+void HttpClient::updateContact(const QString &userId, const QString &nickname, const QString &groupNickname, const QString &avatar)
 {
     QNetworkRequest req = authedRequest("/api/service/contacts/" + userId);
     QJsonObject body;
     if (!nickname.isEmpty()) body["nickname"] = nickname;
+    if (!groupNickname.isEmpty()) body["groupNickname"] = groupNickname;
     if (!avatar.isEmpty()) body["avatar"] = avatar;
 
     QNetworkReply *reply = m_nam.put(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
@@ -152,6 +154,54 @@ void HttpClient::getProfile()
             emit profileUpdated(resp["data"].toObject());
         },
         [](const QString &err) { qWarning() << "[HttpClient] getProfile error:" << err; });
+}
+
+// ── 群组管理 ─────────────────────────────────────────────────────
+
+void HttpClient::getGroups()
+{
+    QNetworkRequest req = authedRequest("/api/service/groups");
+    QNetworkReply *reply = m_nam.get(req);
+    handleReply(reply,
+        [this](const QJsonObject &resp) {
+            emit groupsLoaded(resp["data"].toObject()["list"].toArray());
+        },
+        [this](const QString &err) { emit groupError(err); });
+}
+
+void HttpClient::inviteToGroup(const QString &groupId, const QString &userId)
+{
+    QNetworkRequest req = authedRequest("/api/service/groups/" + groupId + "/members");
+    QJsonObject body;
+    body["userId"] = userId;
+    QNetworkReply *reply = m_nam.post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    handleReply(reply,
+        [this, groupId](const QJsonObject &) {
+            emit groupMemberChanged(groupId);
+        },
+        [this](const QString &err) { emit groupError(err); });
+}
+
+void HttpClient::kickFromGroup(const QString &groupId, const QString &userId)
+{
+    QNetworkRequest req = authedRequest("/api/service/groups/" + groupId + "/members/" + userId);
+    QNetworkReply *reply = m_nam.deleteResource(req);
+    handleReply(reply,
+        [this, groupId](const QJsonObject &) {
+            emit groupMemberChanged(groupId);
+        },
+        [this](const QString &err) { emit groupError(err); });
+}
+
+void HttpClient::dissolveGroup(const QString &groupId)
+{
+    QNetworkRequest req = authedRequest("/api/service/groups/" + groupId);
+    QNetworkReply *reply = m_nam.deleteResource(req);
+    handleReply(reply,
+        [this, groupId](const QJsonObject &) {
+            emit groupMemberChanged(groupId);
+        },
+        [this](const QString &err) { emit groupError(err); });
 }
 
 void HttpClient::updateProfile(const QString &nickname, const QString &avatar)

@@ -28,6 +28,13 @@
 
       <!-- Arrow + bubble wrapper -->
       <div class="bubble-wrapper">
+        <!-- 群消息发送者名（非自己时显示） -->
+        <div
+          v-if="message.isGroup && !isSelf && message.senderName"
+          class="group-sender-name"
+        >
+          {{ message.senderName }}
+        </div>
         <div class="bubble-arrow" />
         <div class="message-bubble" :class="isSelf ? 'self' : 'other'">
           <!-- Text message -->
@@ -81,6 +88,13 @@ defineProps<{
 
 .bubble-and-status.self {
   flex-direction: row-reverse;
+}
+
+.group-sender-name {
+  font-size: 11px;
+  color: #999;
+  margin-bottom: 2px;
+  padding-left: 2px;
 }
 
 .bubble-text {

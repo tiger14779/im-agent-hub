@@ -51,9 +51,19 @@ public:
     // 获取联系人列表: GET /api/service/contacts
     Q_INVOKABLE void getContacts();
     // 添加用户（联系人）: POST /api/service/contacts
-    Q_INVOKABLE void addContact(const QString &nickname, const QString &avatar);
-    // 更新联系人信息（昵称/头像）: PUT /api/service/contacts/:userId
-    Q_INVOKABLE void updateContact(const QString &userId, const QString &nickname, const QString &avatar);
+    Q_INVOKABLE void addContact(const QString &nickname, const QString &groupNickname, const QString &avatar);
+    // 更新联系人信息（昵称/备注/群内昵称/头像）: PUT /api/service/contacts/:userId
+    Q_INVOKABLE void updateContact(const QString &userId, const QString &nickname, const QString &groupNickname, const QString &avatar);
+
+    // === 群组管理 ===
+    // 获取本客服下的群列表（含成员）: GET /api/service/groups
+    Q_INVOKABLE void getGroups();
+    // 邀请用户入群: POST /api/service/groups/:groupId/members
+    Q_INVOKABLE void inviteToGroup(const QString &groupId, const QString &userId);
+    // 踢出群成员: DELETE /api/service/groups/:groupId/members/:userId
+    Q_INVOKABLE void kickFromGroup(const QString &groupId, const QString &userId);
+    // 解散群组（仅群主）: DELETE /api/service/groups/:groupId
+    Q_INVOKABLE void dissolveGroup(const QString &groupId);
     // 获取客服自己的个人资料: GET /api/service/profile
     Q_INVOKABLE void getProfile();
     // 更新客服自己的个人资料: PUT /api/service/profile
@@ -111,6 +121,11 @@ signals:
     void contactUpdated(const QJsonObject &contact); // 更新联系人成功
     void contactError(const QString &error);         // 联系人操作失败
     void profileUpdated(const QJsonObject &data);    // 个人资料更新成功
+
+    // ── 群组相关信号 ──
+    void groupsLoaded(const QJsonArray &groups);     // 群列表加载完成
+    void groupMemberChanged(const QString &groupId); // 群成员变化（邀请/踢出后刷新）
+    void groupError(const QString &error);           // 群操作失败
 
     // ── 上传相关信号 ──
     void uploadSuccess(const QString &url, const QString &fileName, qint64 fileSize); // 文件上传成功

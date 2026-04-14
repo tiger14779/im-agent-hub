@@ -12,8 +12,10 @@ type Message struct {
 	Content        string `gorm:"type:text" json:"content"` // JSON string: {"text":"hello"} or {"url":"...","name":"..."}
 	SendTime       int64  `gorm:"index" json:"sendTime"`
 	Seq            int64  `gorm:"index" json:"seq"` // per-conversation sequence
-	Status         int    `json:"status"`           // 1=sending, 2=delivered, 3=failed
-	Deleted        bool   `json:"deleted"`          // soft-delete flag
+	Status         int    `json:"status"`                    // 1=sending, 2=delivered, 3=failed
+	Deleted        bool   `json:"deleted"`                   // soft-delete flag
+	IsGroup        bool   `json:"isGroup"`                   // true for group messages
+	SenderName     string `gorm:"size:128" json:"senderName"` // fixed display name at send time
 }
 
 // Conversation tracks the latest state of a chat between two users.
@@ -24,6 +26,8 @@ type Conversation struct {
 	LastMsgContent string `gorm:"type:text" json:"lastMsgContent"` // preview text
 	LastMsgTime    int64  `json:"lastMsgTime"`
 	LastSeq        int64  `json:"lastSeq"`
-	UnreadA        int    `json:"unreadA"` // unread count for userA
-	UnreadB        int    `json:"unreadB"` // unread count for userB
+	UnreadA        int    `json:"unreadA"`              // unread count for userA
+	UnreadB        int    `json:"unreadB"`              // unread count for userB
+	GroupID        string `gorm:"size:64" json:"groupId"` // group conv: group ID; private: empty
+	Dissolved      bool   `json:"dissolved"`            // group disbanded flag
 }
