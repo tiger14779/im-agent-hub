@@ -41,7 +41,8 @@ logs/
 .env.*.local
 
 # IDE
-.vscode/
+# .vscode/ 已共享，包含 launch.json 和 tasks.json 供团队使用
+.vscode/*.log
 .idea/
 *.swp
 *.swo

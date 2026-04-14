@@ -1,0 +1,146 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "dev:all",
+      "dependsOn": ["dev:server", "dev:h5", "dev:admin"],
+      "dependsOrder": "parallel",
+      "runOptions": {
+        "reevaluateOnRerun": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "dev:all:restart",
+      "dependsOn": ["dev:all:stop", "dev:all"],
+      "dependsOrder": "sequence",
+      "runOptions": {
+        "reevaluateOnRerun": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "dev:all:stop",
+      "type": "shell",
+      "command": "$ErrorActionPreference = 'SilentlyContinue'; $ports = @(3000,3001,8080); foreach ($p in $ports) { Get-NetTCPConnection -LocalPort $p -State Listen | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { try { Stop-Process -Id $_ -Force -ErrorAction Stop } catch {} } }; exit 0",
+      "problemMatcher": []
+    },
+    {
+      "label": "dev:h5",
+      "type": "shell",
+      "command": "npm.cmd",
+      "args": ["run", "dev", "--", "--host", "0.0.0.0", "--port", "3000"],
+      "options": {
+        "cwd": "${workspaceFolder}/web/h5"
+      },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "dev:admin",
+      "type": "shell",
+      "command": "npm.cmd",
+      "args": ["run", "dev", "--", "--host", "0.0.0.0", "--port", "3001"],
+      "options": {
+        "cwd": "${workspaceFolder}/web/admin"
+      },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "dev:server",
+      "type": "shell",
+      "command": "$env:CGO_ENABLED='1'; $env:CC='C:\\Users\\Administrator\\AppData\\Local\\Microsoft\\WinGet\\Packages\\MartinStorsjo.LLVM-MinGW.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\llvm-mingw-20260311-ucrt-x86_64\\bin\\gcc.exe'; $env:GOPROXY='https://goproxy.cn,direct'; $env:GOSUMDB='sum.golang.google.cn'; go run .",
+      "options": {
+        "cwd": "${workspaceFolder}/server"
+      },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "install:h5",
+      "type": "shell",
+      "command": "npm.cmd",
+      "args": ["install"],
+      "options": {
+        "cwd": "${workspaceFolder}/web/h5"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "install:admin",
+      "type": "shell",
+      "command": "npm.cmd",
+      "args": ["install"],
+      "options": {
+        "cwd": "${workspaceFolder}/web/admin"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "install:server",
+      "type": "shell",
+      "command": "$env:CGO_ENABLED='1'; $env:CC='C:\\Users\\Administrator\\AppData\\Local\\Microsoft\\WinGet\\Packages\\MartinStorsjo.LLVM-MinGW.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\llvm-mingw-20260311-ucrt-x86_64\\bin\\gcc.exe'; $env:GOPROXY='https://goproxy.cn,direct'; $env:GOSUMDB='sum.golang.google.cn'; go mod download",
+      "options": {
+        "cwd": "${workspaceFolder}/server"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "pc:configure",
+      "type": "process",
+      "command": "${workspaceFolder}/pc/scripts/configure.bat",
+      "options": {
+        "cwd": "${workspaceFolder}/pc"
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "detail": "CMake 配置 (Qt 6.7.3 + MSVC 2022 + Ninja)"
+    },
+    {
+      "label": "pc:build",
+      "type": "process",
+      "command": "${workspaceFolder}/pc/scripts/build.bat",
+      "options": {
+        "cwd": "${workspaceFolder}/pc"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "problemMatcher": "$msCompile",
+      "detail": "编译 PC 客户端 (Debug)"
+    },
+    {
+      "label": "pc:deploy",
+      "type": "shell",
+      "command": "E:\\Development_environment\\qt\\6.7.3\\msvc2022_64\\bin\\windeployqt6.exe",
+      "args": [
+        "--qmldir",
+        "${workspaceFolder}/pc/qml",
+        "${workspaceFolder}/pc/build/im-agent-hub-pc.exe"
+      ],
+      "group": "build",
+      "problemMatcher": [],
+      "detail": "windeployqt 部署 Qt DLLs"
+    },
+    {
+      "label": "pc:run",
+      "type": "process",
+      "command": "${workspaceFolder}/pc/scripts/run.bat",
+      "options": {
+        "cwd": "${workspaceFolder}/pc"
+      },
+      "isBackground": true,
+      "problemMatcher": [],
+      "detail": "运行 PC 客户端"
+    },
+    {
+      "label": "pc:build+run",
+      "dependsOn": ["pc:build", "pc:run"],
+      "dependsOrder": "sequence",
+      "problemMatcher": [],
+      "detail": "编译并运行 PC 客户端"
+    }
+  ]
+}

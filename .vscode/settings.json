@@ -1,0 +1,12 @@
+{
+  "go.useLanguageServer": true,
+  "go.toolsManagement.autoUpdate": true,
+  "go.toolsEnvVars": {
+    "GOPROXY": "https://goproxy.cn,direct",
+    "GOSUMDB": "sum.golang.google.cn"
+  },
+  "yaml.schemas": {
+    "https://json.schemastore.org/github-workflow.json": "**/.github/workflows/*"
+  },
+  "cmake.sourceDirectory": "E:/programme/SynologyDrive/work_project/newboos/wxchat/h5/pc"
+}

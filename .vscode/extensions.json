@@ -1,0 +1,8 @@
+{
+  "recommendations": [
+    "Vue.volar",
+    "golang.Go",
+    "redhat.vscode-yaml",
+    "ms-azuretools.vscode-docker"
+  ]
+}
