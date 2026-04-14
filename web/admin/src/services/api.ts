@@ -2,12 +2,14 @@ import request from '@/utils/request'
 
 export interface CreateUserRequest {
   nickname: string
+  groupNickname: string
   serviceUserId: string
   avatar?: string
 }
 
 export interface UpdateUserRequest {
   nickname?: string
+  groupNickname?: string
   serviceUserId?: string
   status?: number
   avatar?: string
@@ -94,3 +96,16 @@ export const uploadFile = (file: File) => {
     headers: { 'Content-Type': 'multipart/form-data' }
   })
 }
+
+// Groups
+export const getGroups = () =>
+  request.get('/groups')
+
+export const createGroup = (data: { name: string; ownerId: string; avatar?: string }) =>
+  request.post('/groups', data)
+
+export const updateGroup = (id: string, data: { name?: string; avatar?: string }) =>
+  request.put(`/groups/${id}`, data)
+
+export const deleteGroup = (id: string) =>
+  request.delete(`/groups/${id}`)

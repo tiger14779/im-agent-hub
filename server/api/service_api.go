@@ -5,6 +5,7 @@ import (
 	"im-agent-hub/model"
 	"im-agent-hub/pkg"
 	"im-agent-hub/service"
+	"sort"
 
 	"github.com/gin-gonic/gin"
 )
@@ -37,19 +38,21 @@ func ServiceGetContacts() gin.HandlerFunc {
 		}
 
 		type contactItem struct {
-			UserID      string `json:"userId"`
-			Nickname    string `json:"nickname"`
-			Avatar      string `json:"avatar"`
-			UnreadCount int    `json:"unreadCount"`
-			LastMessage string `json:"lastMessage"`
-			LastTime    int64  `json:"lastTime"`
+			UserID        string `json:"userId"`
+			Nickname      string `json:"nickname"`
+			GroupNickname string `json:"groupNickname"`
+			Avatar        string `json:"avatar"`
+			UnreadCount   int    `json:"unreadCount"`
+			LastMessage   string `json:"lastMessage"`
+			LastTime      int64  `json:"lastTime"`
 		}
 		list := make([]contactItem, 0, len(users))
 		for _, u := range users {
 			item := contactItem{
-				UserID:   u.ID,
-				Nickname: u.Nickname,
-				Avatar:   u.Avatar,
+				UserID:        u.ID,
+				Nickname:      u.Nickname,
+				GroupNickname: u.GroupNickname,
+				Avatar:        u.Avatar,
 			}
 			if conv, ok := convMap[u.ID]; ok {
 				if staffID == conv.UserA {
@@ -62,6 +65,11 @@ func ServiceGetContacts() gin.HandlerFunc {
 			}
 			list = append(list, item)
 		}
+
+		// 按最后消息时间降序排列（有消息的在前，无消息的在后）
+		sort.Slice(list, func(i, j int) bool {
+			return list[i].LastTime > list[j].LastTime
+		})
 
 		pkg.Success(c, list)
 	}
@@ -78,15 +86,16 @@ func ServiceAddUser(userSvc *service.UserService, chatHub *ChatHub) gin.HandlerF
 		}
 
 		var req struct {
-			Nickname string `json:"nickname" binding:"required"`
-			Avatar   string `json:"avatar"`
+			Nickname      string `json:"nickname" binding:"required"`
+			GroupNickname string `json:"groupNickname" binding:"required"`
+			Avatar        string `json:"avatar"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			pkg.Fail(c, 400, "nickname is required")
+			pkg.Fail(c, 400, "nickname and groupNickname are required")
 			return
 		}
 
-		user, err := userSvc.CreateUser(req.Nickname, staffID)
+		user, err := userSvc.CreateUser(req.Nickname, req.GroupNickname, staffID)
 		if err != nil {
 			pkg.Fail(c, 500, "创建用户失败: "+err.Error())
 			return
@@ -100,9 +109,10 @@ func ServiceAddUser(userSvc *service.UserService, chatHub *ChatHub) gin.HandlerF
 		chatHub.NotifyContactsUpdated(staffID)
 
 		pkg.Success(c, gin.H{
-			"userId":   user.ID,
-			"nickname": user.Nickname,
-			"avatar":   req.Avatar,
+			"userId":        user.ID,
+			"nickname":      user.Nickname,
+			"groupNickname": user.GroupNickname,
+			"avatar":        req.Avatar,
 		})
 	}
 }
@@ -122,8 +132,9 @@ func ServiceUpdateContact() gin.HandlerFunc {
 		}
 
 		var req struct {
-			Nickname *string `json:"nickname"`
-			Avatar   *string `json:"avatar"`
+			Nickname      *string `json:"nickname"`
+			GroupNickname *string `json:"groupNickname"`
+			Avatar        *string `json:"avatar"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			pkg.Fail(c, 400, "invalid request")
@@ -133,6 +144,9 @@ func ServiceUpdateContact() gin.HandlerFunc {
 		updates := map[string]interface{}{}
 		if req.Nickname != nil {
 			updates["nickname"] = *req.Nickname
+		}
+		if req.GroupNickname != nil {
+			updates["group_nickname"] = *req.GroupNickname
 		}
 		if req.Avatar != nil {
 			updates["avatar"] = *req.Avatar
@@ -147,9 +161,10 @@ func ServiceUpdateContact() gin.HandlerFunc {
 		// Re-read
 		database.DB.First(&user, "id = ?", userID)
 		pkg.Success(c, gin.H{
-			"userId":   user.ID,
-			"nickname": user.Nickname,
-			"avatar":   user.Avatar,
+			"userId":        user.ID,
+			"nickname":      user.Nickname,
+			"groupNickname": user.GroupNickname,
+			"avatar":        user.Avatar,
 		})
 	}
 }

@@ -42,11 +42,12 @@
           <span class="title">{{ staffNickname }} — 客服工作台</span>
         </header>
         <div class="user-list">
+          <!-- Users -->
           <div
             v-for="u in assignedUsers"
             :key="u.userId"
             class="user-list-item"
-            @click="selectUser(u.userId, u.nickname)"
+            @click="selectUser(u.userId, u.nickname, u.avatar)"
           >
             <div class="avatar">{{ (u.nickname || u.userId).charAt(0) }}</div>
             <div class="user-list-info">
@@ -54,7 +55,23 @@
               <span class="user-list-id">{{ u.userId }}</span>
             </div>
           </div>
-          <div v-if="assignedUsers.length === 0" class="empty-hint">
+          <!-- Groups -->
+          <div
+            v-for="g in groups"
+            :key="g.groupId"
+            class="user-list-item"
+            @click="selectGroup(g.groupId, g.name, g.avatar)"
+          >
+            <div class="avatar group-avatar">
+              <img v-if="g.avatar" :src="g.avatar" style="width:100%;height:100%;object-fit:cover;border-radius:inherit" />
+              <span v-else>群</span>
+            </div>
+            <div class="user-list-info">
+              <span class="user-list-name">{{ g.name }}</span>
+              <span class="user-list-id">群聊</span>
+            </div>
+          </div>
+          <div v-if="assignedUsers.length === 0 && groups.length === 0" class="empty-hint">
             暂无分配的用户
           </div>
         </div>
@@ -71,6 +88,8 @@
         <MessageList
           :messages="chatStore.messages"
           :my-id="myUserId"
+          :staff-avatar="activePeerIsGroup ? undefined : activePeerAvatar"
+          :staff-name="activePeerIsGroup ? undefined : activePeerName"
           :loading-more="loadingMore"
           :has-more="chatStore.hasMore"
           @load-more="onLoadMore"
@@ -110,13 +129,17 @@ const loginId = ref('')
 const myUserId = ref('')
 const myToken = ref('')
 const staffNickname = ref('客服')
-const assignedUsers = ref<{ userId: string; nickname: string }[]>([])
+const assignedUsers = ref<{ userId: string; nickname: string; avatar: string }[]>([])
+const groups = ref<{ groupId: string; name: string; avatar: string }[]>([])
 
 const activePeer = ref('')
 const activePeerName = ref('')
+const activePeerAvatar = ref('')
+const activePeerIsGroup = ref(false)
 const loadingMore = ref(false)
 const oldestSeq = ref(0)
 let isSyncing = false // flag: true when reloading history after reconnect
+let pendingHistoryPeer = '' // tracks which peer's history we are waiting for (race guard)
 
 function parseContent(m: Message): Message {
   const msg = { ...m }
@@ -161,7 +184,24 @@ async function doLogin() {
     myUserId.value = res.userId
     myToken.value = res.token
     staffNickname.value = res.nickname || '客服'
-    assignedUsers.value = res.users || []
+    assignedUsers.value = (res.users || []).map((u: { userId: string; nickname: string; avatar?: string }) => ({
+      userId: u.userId,
+      nickname: u.nickname,
+      avatar: u.avatar || ''
+    }))
+
+    // Fetch groups this staff member belongs to
+    try {
+      const gRes = await request.get('/service/groups', {
+        headers: {
+          'Authorization': `Bearer ${res.token}`,
+          'X-Service-UserID': res.userId
+        }
+      }) as { list: any[] }
+      groups.value = (gRes?.list || []).map((g: any) => ({ groupId: g.id || g.groupId, name: g.name, avatar: g.avatar || '' }))
+    } catch {
+      groups.value = []
+    }
 
     if (!res.token) {
       throw new Error('登录信息不完整')
@@ -175,11 +215,19 @@ async function doLogin() {
       }
     }
 
+    chatWs.onNewGroupMessage = (msg) => {
+      if (activePeerIsGroup.value && activePeer.value === msg.groupId) {
+        chatStore.addMessage(msg)
+      }
+    }
+
     chatWs.onAck = (ack) => {
       chatStore.updateMessageStatus(ack.clientMsgId, ack.status, ack.serverMsgId)
     }
 
     chatWs.onHistory = (data) => {
+      // Discard stale responses that arrived after switching to a different peer
+      if (data.peerUserId !== pendingHistoryPeer) return
       const parsed = (data.messages as unknown as Message[]).map(parseContent)
       if (isSyncing) {
         chatStore.mergeMessages(parsed)
@@ -208,10 +256,11 @@ async function doLogin() {
     chatWs.onReconnected = () => {
       if (activePeer.value) {
         isSyncing = true
-        chatWs.loadHistory(activePeer.value)
+        const peerId = activePeerIsGroup.value ? 'group_' + activePeer.value : activePeer.value
+        pendingHistoryPeer = peerId
+        chatWs.loadHistory(peerId)
       }
     }
-
     // Update URL to include id for refresh
     if (!route.query.id) {
       router.replace({ query: { id } })
@@ -225,12 +274,15 @@ async function doLogin() {
   }
 }
 
-function selectUser(userId: string, nickname: string) {
+function selectUser(userId: string, nickname: string, avatar: string) {
   activePeer.value = userId
   activePeerName.value = nickname || userId
+  activePeerAvatar.value = avatar || ''
+  activePeerIsGroup.value = false
+  isSyncing = false
   chatStore.clearMessages()
   oldestSeq.value = 0
-
+  pendingHistoryPeer = userId
   chatWs.loadHistory(userId)
   chatWs.markRead(userId)
 }
@@ -238,17 +290,48 @@ function selectUser(userId: string, nickname: string) {
 function goBack() {
   activePeer.value = ''
   activePeerName.value = ''
+  activePeerAvatar.value = ''
+  activePeerIsGroup.value = false
   chatStore.clearMessages()
+}
+
+function selectGroup(groupId: string, name: string, avatar = '') {
+  activePeer.value = groupId
+  activePeerName.value = name
+  activePeerAvatar.value = avatar
+  activePeerIsGroup.value = true
+  isSyncing = false
+  chatStore.clearMessages()
+  oldestSeq.value = 0
+  pendingHistoryPeer = 'group_' + groupId
+  chatWs.loadHistory('group_' + groupId)
 }
 
 function onLoadMore() {
   if (loadingMore.value || !chatStore.hasMore) return
   loadingMore.value = true
-  chatWs.loadHistory(activePeer.value, oldestSeq.value, 50)
+  const peerId = activePeerIsGroup.value ? 'group_' + activePeer.value : activePeer.value
+  chatWs.loadHistory(peerId, oldestSeq.value, 50)
 }
 
 function onSendText(text: string) {
   const peerId = activePeer.value
+  if (activePeerIsGroup.value) {
+    const clientMsgID = chatWs.sendGroupMessage(peerId, text)
+    chatStore.addMessage({
+      clientMsgID,
+      sendID: myUserId.value,
+      recvID: peerId,
+      sessionType: 1,
+      contentType: 101,
+      content: JSON.stringify({ text }),
+      textContent: text,
+      sendTime: Date.now(),
+      status: 1,
+      isGroup: true
+    })
+    return
+  }
   const clientMsgID = chatWs.sendTextMessage(peerId, text)
   chatStore.addMessage({
     clientMsgID,
@@ -451,4 +534,9 @@ onUnmounted(() => {
 }
 
 .login-btn:disabled { opacity: 0.5; }
+
+.group-avatar {
+  background: #5b8cff;
+  font-size: 13px;
+}
 </style>

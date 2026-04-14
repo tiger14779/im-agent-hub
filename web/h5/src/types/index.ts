@@ -9,6 +9,11 @@ export interface Message {
   sendTime: number
   status: number // 1=sending, 2=sent, 3=failed
   isRead?: boolean
+  isGroup?: boolean      // 是否群消息
+  senderName?: string    // 发送者在群内的显示名（群消息时携带）
+  senderAvatar?: string  // 发送者头像 URL（群消息时携带）
+  groupId?: string       // 群消息时的群 ID
+  groupName?: string     // 群消息时的群名称
   // Parsed content based on contentType
   textContent?: string
   pictureContent?: PictureContent

@@ -24,7 +24,10 @@
         </div>
       </el-form-item>
       <el-form-item label="昵称" prop="nickname">
-        <el-input v-model="form.nickname" placeholder="请输入用户昵称" />
+        <el-input v-model="form.nickname" placeholder="请输入用户昵称（备注）" />
+      </el-form-item>
+      <el-form-item label="群内昵称" prop="groupNickname">
+        <el-input v-model="form.groupNickname" placeholder="群聊中显示的名称（必填）" />
       </el-form-item>
       <el-form-item label="绑定客服" prop="serviceId">
         <el-select v-model="form.serviceUserId" placeholder="请选择客服" style="width: 100%">
@@ -75,12 +78,13 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   close: []
-  submit: [data: { nickname: string; serviceUserId: string; avatar?: string }]
+  submit: [data: { nickname: string; groupNickname: string; serviceUserId: string; avatar?: string }]
 }>()
 
 const formRef = ref<FormInstance>()
 const form = reactive({
   nickname: '',
+  groupNickname: '',
   serviceUserId: '',
   avatar: ''
 })
@@ -90,6 +94,7 @@ const previewId = ref('')
 
 const rules: FormRules = {
   nickname: [{ required: true, message: '请输入昵称', trigger: 'blur' }],
+  groupNickname: [{ required: true, message: '请输入群内昵称', trigger: 'blur' }],
   serviceUserId: [{ required: true, message: '请选择绑定客服', trigger: 'change' }]
 }
 
@@ -97,10 +102,12 @@ watch(() => props.visible, (val) => {
   if (val) {
     if (props.user) {
       form.nickname = props.user.nickname
+      form.groupNickname = (props.user as unknown as { groupNickname?: string }).groupNickname || ''
       form.serviceUserId = props.user.serviceUserId
       form.avatar = props.user.avatar || ''
     } else {
       form.nickname = ''
+      form.groupNickname = ''
       form.serviceUserId = ''
       form.avatar = ''
       previewId.value = 'user_' + Math.random().toString(36).substring(2, 10)
@@ -127,6 +134,7 @@ const handleSubmit = async () => {
     if (valid) {
       emit('submit', {
         nickname: form.nickname,
+        groupNickname: form.groupNickname,
         serviceUserId: form.serviceUserId,
         avatar: form.avatar || undefined
       })

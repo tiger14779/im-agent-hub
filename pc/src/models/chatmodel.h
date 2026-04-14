@@ -25,6 +25,9 @@ struct ChatMessage {
     int voiceDuration = 0;             // 语音时长（秒，contentType=103 时使用）
     qint64 sendTime = 0;               // 发送时间戳（毫秒）
     int status = 2;                    // 发送状态: 1=发送中, 2=已发送, 3=发送失败
+    QString senderName;                // 发送者显示名（群消息携带）
+    QString senderAvatar;              // 发送者头像URL（群消息携带）
+    bool isGroup = false;              // 是否群消息
 };
 
 /**
@@ -53,7 +56,10 @@ public:
         VoiceDurationRole,                   // 语音时长
         SendTimeRole,                        // 发送时间
         StatusRole,                          // 发送状态
-        IsSelfRole                           // 是否为自己发送
+        IsSelfRole,                          // 是否为自己发送
+        SenderNameRole,                      // 发送者显示名（群消息用）
+        SenderAvatarRole,                    // 发送者头像URL（群消息用）
+        IsGroupRole                          // 是否群消息
     };
 
     explicit ChatModel(QObject *parent = nullptr);

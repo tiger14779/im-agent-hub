@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -37,8 +38,9 @@ type ChatHub struct {
 
 // msgTask is a send_message job queued for sequential DB processing.
 type msgTask struct {
-	cc   *ChatConn
-	data json.RawMessage
+	cc      *ChatConn
+	data    json.RawMessage
+	isGroup bool
 }
 
 // ChatConn represents a single WebSocket connection.
@@ -69,7 +71,11 @@ func NewChatHub(msgSvc *service.MessageService) *ChatHub {
 // msgWorker processes send_message tasks sequentially from the channel.
 func (h *ChatHub) msgWorker() {
 	for task := range h.msgCh {
-		h.handleSendMessage(task.cc, task.data)
+		if task.isGroup {
+			h.handleSendGroupMessage(task.cc, task.data)
+		} else {
+			h.handleSendMessage(task.cc, task.data)
+		}
 	}
 }
 
@@ -255,6 +261,26 @@ func (h *ChatHub) readLoop(cc *ChatConn) {
 					})
 				}
 			}
+		case "send_group_message":
+			select {
+			case h.msgCh <- msgTask{cc: cc, data: env.Data, isGroup: true}:
+			default:
+				log.Printf("[WS] group message channel full, dropping message from %s", cc.userID)
+				var partial struct {
+					ClientMsgID string `json:"clientMsgId"`
+				}
+				_ = json.Unmarshal(env.Data, &partial)
+				if partial.ClientMsgID != "" {
+					h.sendJSON(cc, map[string]interface{}{
+						"type": "message_ack",
+						"data": map[string]interface{}{
+							"clientMsgId": partial.ClientMsgID,
+							"status":      3,
+							"error":       "server busy",
+						},
+					})
+				}
+			}
 		case "load_history":
 			h.handleLoadHistory(cc, env.Data)
 		case "mark_read":
@@ -377,7 +403,13 @@ func (h *ChatHub) handleLoadHistory(cc *ChatConn, data json.RawMessage) {
 		return
 	}
 
-	convID := service.MakeConversationID(cc.userID, req.PeerUserID)
+	// 群会话直接用 peerUserId 作为 convID（格式："group_<groupId>"）
+	var convID string
+	if strings.HasPrefix(req.PeerUserID, "group_") {
+		convID = req.PeerUserID
+	} else {
+		convID = service.MakeConversationID(cc.userID, req.PeerUserID)
+	}
 	msgs, err := h.msgSvc.GetHistory(convID, req.BeforeSeq, req.Limit)
 
 	resp := map[string]interface{}{
@@ -584,6 +616,156 @@ func (h *ChatHub) broadcastClientStatus(clientUserID, status string) {
 		h.sendJSON(cc, msg)
 	}
 	log.Printf("[WS] broadcast client_online_status: userId=%s status=%s to %d staff", clientUserID, status, len(staffConns))
+}
+
+// broadcastGroupEvent sends a group event to all online members of a group.
+func (h *ChatHub) broadcastGroupEvent(groupID, eventType string, payload map[string]interface{}) {
+	var members []model.GroupMember
+	database.DB.Where("group_id = ?", groupID).Find(&members)
+
+	for _, m := range members {
+		memberID := m.UserID
+		h.sendToUser(memberID, map[string]interface{}{
+			"type": eventType,
+			"data": payload,
+		})
+	}
+	log.Printf("[WS] broadcastGroupEvent: groupId=%s event=%s to %d members", groupID, eventType, len(members))
+}
+
+// handleSendGroupMessage processes a group message from any connected user.
+// Concurrent fan-out: saves once with FOR UPDATE seq lock, then pushes to all members in parallel.
+func (h *ChatHub) handleSendGroupMessage(cc *ChatConn, data json.RawMessage) {
+	var req struct {
+		GroupID     string          `json:"groupId"`
+		ContentType int             `json:"contentType"`
+		Content     json.RawMessage `json:"content"`
+		ClientMsgID string          `json:"clientMsgId"`
+	}
+	if err := json.Unmarshal(data, &req); err != nil || req.GroupID == "" {
+		log.Printf("[WS] bad send_group_message from %s", cc.userID)
+		var partial struct {
+			ClientMsgID string `json:"clientMsgId"`
+		}
+		_ = json.Unmarshal(data, &partial)
+		if partial.ClientMsgID != "" {
+			h.sendToUser(cc.userID, map[string]interface{}{
+				"type": "message_ack",
+				"data": map[string]interface{}{"clientMsgId": partial.ClientMsgID, "status": 3, "error": "invalid group message"},
+			})
+		}
+		return
+	}
+
+	// Verify group exists and not dissolved
+	var g model.Group
+	if err := database.DB.First(&g, "id = ? AND dissolved = false", req.GroupID).Error; err != nil {
+		h.sendToUser(cc.userID, map[string]interface{}{
+			"type": "message_ack",
+			"data": map[string]interface{}{"clientMsgId": req.ClientMsgID, "status": 3, "error": "group not found or dissolved"},
+		})
+		return
+	}
+
+	// Verify sender is a group member
+	var membership model.GroupMember
+	if err := database.DB.First(&membership, "group_id = ? AND user_id = ?", req.GroupID, cc.userID).Error; err != nil {
+		h.sendToUser(cc.userID, map[string]interface{}{
+			"type": "message_ack",
+			"data": map[string]interface{}{"clientMsgId": req.ClientMsgID, "status": 3, "error": "not a group member"},
+		})
+		return
+	}
+
+	// Normalize content
+	contentStr := string(req.Content)
+	if len(contentStr) > 0 && contentStr[0] == '"' {
+		var s string
+		if err := json.Unmarshal(req.Content, &s); err == nil {
+			contentStr = s
+		}
+	}
+
+	// Determine sender display name and avatar (fixed at send time)
+	senderName := ""
+	senderAvatar := ""
+	var u model.User
+	if err := database.DB.First(&u, "id = ?", cc.userID).Error; err == nil {
+		senderName = u.GroupNickname
+		senderAvatar = u.Avatar
+	} else {
+		// sender is staff
+		var s model.ServiceStaff
+		if err2 := database.DB.First(&s, "user_id = ?", cc.userID).Error; err2 == nil {
+			senderName = s.Nickname
+			senderAvatar = s.Avatar
+		}
+	}
+
+	// Save group message — RecvID = groupID, IsGroup = true, SenderName/Avatar fixed
+	msg, isDup, err := h.msgSvc.SaveGroupMessage(cc.userID, req.GroupID, req.ContentType, contentStr, req.ClientMsgID, senderName, senderAvatar)
+	if err != nil {
+		log.Printf("[WS] save group message error: %v", err)
+		h.sendToUser(cc.userID, map[string]interface{}{
+			"type": "message_ack",
+			"data": map[string]interface{}{"clientMsgId": req.ClientMsgID, "status": 3, "error": err.Error()},
+		})
+		return
+	}
+
+	// ACK back to sender
+	h.sendToUser(cc.userID, map[string]interface{}{
+		"type": "message_ack",
+		"data": map[string]interface{}{
+			"clientMsgId": req.ClientMsgID,
+			"serverMsgId": msg.ServerMsgID,
+			"seq":         msg.Seq,
+			"sendTime":    msg.SendTime,
+			"status":      2,
+		},
+	})
+
+	if isDup {
+		return
+	}
+
+	// Get group member count for display
+	var memberCnt int64
+	database.DB.Model(&model.GroupMember{}).Where("group_id = ?", req.GroupID).Count(&memberCnt)
+	groupDisplayName := g.Name
+
+	// Push to all group members concurrently (fan-out)
+	var members []model.GroupMember
+	database.DB.Where("group_id = ?", req.GroupID).Find(&members)
+
+	pushPayload := map[string]interface{}{
+		"type": "new_group_message",
+		"data": map[string]interface{}{
+			"serverMsgID":    msg.ServerMsgID,
+			"clientMsgID":    msg.ClientMsgID,
+			"conversationID": msg.ConversationID,
+			"groupId":        req.GroupID,
+			"groupName":      groupDisplayName,
+			"memberCount":    memberCnt,
+			"sendID":         msg.SendID,
+			"senderName":     msg.SenderName,
+			"senderAvatar":   msg.SenderAvatar,
+			"contentType":    msg.ContentType,
+			"content":        msg.Content,
+			"sendTime":       msg.SendTime,
+			"seq":            msg.Seq,
+			"isGroup":        true,
+		},
+	}
+
+	for _, m := range members {
+		if m.UserID == cc.userID {
+			continue // skip sender
+		}
+		memberID := m.UserID
+		go h.sendToUser(memberID, pushPayload)
+	}
+	log.Printf("[WS] group message fanout: groupId=%s seq=%d to %d members", req.GroupID, msg.Seq, len(members))
 }
 
 // handleVisibility processes visibility change from H5 client (page hidden/visible).

@@ -33,7 +33,11 @@ func Init() {
 	sqlDB.SetMaxOpenConns(20)
 	sqlDB.SetMaxIdleConns(5)
 
-	if err := db.AutoMigrate(&model.User{}, &model.ServiceStaff{}, &model.Admin{}, &model.Message{}, &model.Conversation{}); err != nil {
+	if err := db.AutoMigrate(
+		&model.User{}, &model.ServiceStaff{}, &model.Admin{},
+		&model.Message{}, &model.Conversation{},
+		&model.Group{}, &model.GroupMember{},
+	); err != nil {
 		log.Fatalf("failed to auto-migrate: %v", err)
 	}
 
@@ -41,6 +45,8 @@ func Init() {
 	db.Exec("ALTER TABLE messages ALTER COLUMN content TYPE text")
 	// 确保 last_msg_content 列也为 text 类型
 	db.Exec("ALTER TABLE conversations ALTER COLUMN last_msg_content TYPE text")
+	// 存量用户 group_nickname 为空的统一填"无昵称"，后续客服逐一手动修改
+	db.Exec("UPDATE users SET group_nickname = '无昵称' WHERE group_nickname = '' OR group_nickname IS NULL")
 
 	DB = db
 

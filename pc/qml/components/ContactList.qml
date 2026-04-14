@@ -9,13 +9,28 @@ ListView {
 
     property string activeUserId: ""   // 当前选中的联系人ID
     property string serverUrl: ""      // 服务器地址（用于拼接头像URL）
-    signal contactClicked(string cUserId)       // 左键点击联系人
-    signal contactRightClicked(string cUserId)  // 右键点击联系人（打开编辑）
+    signal contactClicked(string cUserId)           // 左键点击联系人
+    signal contactRightClicked(string cUserId)      // 右键点击联系人（保持兼容：打开编辑）
+    signal inviteToGroup(string userId)             // 右键联系人 → 邀请入群
+    signal groupInfoRequested(string groupId)       // 右键群组 → 成员管理
+    signal groupEditRequested(string groupId)       // 右键群组 → 编辑群名/头像
 
     delegate: Rectangle {
+        // Qt 6 requires explicit property declarations to avoid context-sharing bugs
+        // across delegates (which caused all nicknames to show the same value).
+        required property string userId
+        required property string nickname
+        required property string avatarUrl
+        required property string lastMessage
+        required property int unreadCount
+        required property string onlineStatus
+        required property bool isGroup
+        required property int memberCount
+        required property var lastTime
+
         width: contactList.width
         height: 62
-        color: model.userId === contactList.activeUserId ? "#c4c4c4"
+        color: userId === contactList.activeUserId ? "#c4c4c4"
                : (hoverArea.containsMouse ? "#d9d9d9" : "transparent")
 
         MouseArea {
@@ -25,10 +40,45 @@ ListView {
             cursorShape: Qt.PointingHandCursor
             acceptedButtons: Qt.LeftButton | Qt.RightButton
             onClicked: function(mouse) {
-                if (mouse.button === Qt.RightButton)
-                    contactList.contactRightClicked(model.userId)
-                else
-                    contactList.contactClicked(model.userId)
+                if (mouse.button === Qt.RightButton) {
+                    if (isGroup) {
+                        groupMenu.groupId = userId
+                        groupMenu.popup()
+                    } else {
+                        contactMenu.contactId = userId
+                        contactMenu.popup()
+                    }
+                } else {
+                    contactList.contactClicked(userId)
+                }
+            }
+        }
+
+        // 联系人右键菜单
+        Menu {
+            id: contactMenu
+            property string contactId: ""
+            MenuItem {
+                text: "编辑备注/头像"
+                onTriggered: contactList.contactRightClicked(contactMenu.contactId)
+            }
+            MenuItem {
+                text: "邀请入群"
+                onTriggered: contactList.inviteToGroup(contactMenu.contactId)
+            }
+        }
+
+        // 群组右键菜单
+        Menu {
+            id: groupMenu
+            property string groupId: ""
+            MenuItem {
+                text: "编辑群信息"
+                onTriggered: contactList.groupEditRequested(groupMenu.groupId)
+            }
+            MenuItem {
+                text: "成员管理"
+                onTriggered: contactList.groupInfoRequested(groupMenu.groupId)
             }
         }
 
@@ -41,15 +91,15 @@ ListView {
             // 头像区域
             Rectangle {
                 width: 40; height: 40; radius: 4
-                color: "#07c160"
+                color: isGroup ? "#1677ff" : "#07c160"
                 Layout.alignment: Qt.AlignVCenter
 
-                // 有头像URL则显示图片，否则显示昵称首字母
+                // 有头像URL则显示图片，否则显示昵称首字母或群组图标
                 Image {
                     id: avatarImg
                     anchors.fill: parent
                     source: {
-                        var url = model.avatarUrl || ""
+                        var url = avatarUrl || ""
                         if (url.length > 0 && url.charAt(0) === '/')
                             return contactList.serverUrl + url
                         return url
@@ -62,9 +112,11 @@ ListView {
 
                 Label {
                     anchors.centerIn: parent
-                    text: (model.nickname || model.userId || "?").charAt(0).toUpperCase()
+                    text: isGroup
+                          ? "\uD83D\uDC65"
+                          : (nickname || userId || "?").charAt(0).toUpperCase()
                     color: "white"
-                    font.pixelSize: 16
+                    font.pixelSize: isGroup ? 18 : 16
                     font.bold: true
                     visible: avatarImg.status !== Image.Ready
                 }
@@ -80,26 +132,30 @@ ListView {
                     spacing: 6
 
                     Label {
-                        text: model.nickname || model.userId
+                        // 群组显示「群名(成员数)」，普通联系人显示昵称
+                        text: isGroup
+                              ? (nickname || userId) + (memberCount > 0 ? "(" + memberCount + ")" : "")
+                              : (nickname || userId)
                         color: "#333"
                         font.pixelSize: 13
                         elide: Text.ElideRight
                         Layout.fillWidth: true
                     }
 
+                    // 在线状态（仅普通联系人显示）
                     Rectangle {
                         implicitWidth: statusLabel.implicitWidth + 8
                         implicitHeight: 16
                         radius: 8
-                        color: statusBackgroundColor(model.onlineStatus)
-                        visible: statusLabel.text.length > 0
+                        color: statusBackgroundColor(onlineStatus)
+                        visible: !isGroup && statusLabel.text.length > 0
                         Layout.alignment: Qt.AlignVCenter
 
                         Label {
                             id: statusLabel
                             anchors.centerIn: parent
-                            text: statusText(model.onlineStatus)
-                            color: statusTextColor(model.onlineStatus)
+                            text: statusText(onlineStatus)
+                            color: statusTextColor(onlineStatus)
                             font.pixelSize: 9
                             font.bold: true
                         }
@@ -110,13 +166,13 @@ ListView {
                         implicitHeight: 16
                         radius: 8
                         color: "#fa5151"
-                        visible: model.unreadCount > 0
+                        visible: unreadCount > 0
                         Layout.alignment: Qt.AlignVCenter
 
                         Label {
                             id: unreadPillLabel
                             anchors.centerIn: parent
-                            text: model.unreadCount > 99 ? "99+" : String(model.unreadCount)
+                            text: unreadCount > 99 ? "99+" : String(unreadCount)
                             color: "white"
                             font.pixelSize: 9
                             font.bold: true
@@ -124,7 +180,7 @@ ListView {
                     }
 
                     Label {
-                        text: model.lastTime > 0 ? formatTime(model.lastTime) : ""
+                        text: lastTime > 0 ? formatTime(lastTime) : ""
                         color: "#b0b0b0"
                         font.pixelSize: 10
                         visible: text.length > 0
@@ -132,7 +188,7 @@ ListView {
                 }
 
                 Label {
-                    text: model.lastMessage || ""
+                    text: lastMessage || ""
                     color: "#999"
                     font.pixelSize: 12
                     elide: Text.ElideRight

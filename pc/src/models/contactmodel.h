@@ -12,13 +12,16 @@
  * 存储单个联系人的信息，包括最后一条消息和未读数量。
  */
 struct Contact {
-    QString userId;       // 用户ID
-    QString nickname;     // 昵称
+    QString userId;       // 用户ID（群时为 group_xxx）
+    QString nickname;     // 昵称（群时为群名）
     QString avatarUrl;    // 头像URL
     QString lastMessage;  // 最后一条消息预览
     qint64 lastTime = 0;  // 最后消息时间戳
     int unreadCount = 0;  // 未读消息数
     QString onlineStatus; // 在线状态: "online", "background", "offline"
+    bool isGroup = false; // 是否群聊
+    int memberCount = 0;  // 群成员数（isGroup=true 时有效）
+    QString groupNickname; // 群内昵称（用于编辑对话框回显）
 };
 
 /**
@@ -43,7 +46,10 @@ public:
         LastMessageRole,                 // 最后一条消息
         LastTimeRole,                    // 最后消息时间
         UnreadCountRole,                 // 未读数
-        OnlineStatusRole                 // 在线状态
+        OnlineStatusRole,                // 在线状态
+        IsGroupRole,                     // 是否群聊
+        MemberCountRole,                 // 群成员数
+        GroupNicknameRole                // 群内昵称
     };
 
     explicit ContactModel(QObject *parent = nullptr);
@@ -59,11 +65,16 @@ public:
     void setFilterText(const QString &text);
 
     // 从服务器返回的 JSON 数组加载联系人列表（会清空现有数据）
-    Q_INVOKABLE void loadFromJson(const QJsonArray &arr);
+    Q_INVOKABLE void loadFromJson(const QJsonArray &arr, bool isGroup = false);
+
+    // 添加或更新群成员数（群会话使用）
+    Q_INVOKABLE void updateMemberCount(const QString &groupId, int count);
 
     // 添加或更新联系人（已存在则更新昵称和头像）
     Q_INVOKABLE void addOrUpdate(const QString &userId, const QString &nickname,
                                   const QString &avatarUrl = {});
+    // 添加或更新群组条目（必定标记 isGroup=true）
+    Q_INVOKABLE void addOrUpdateAsGroup(const QString &groupId, const QString &name, int memberCount = 0, const QString &avatarUrl = {});
     // 更新联系人昵称
     Q_INVOKABLE void updateNickname(const QString &userId, const QString &nickname);
     // 更新联系人头像
@@ -79,6 +90,10 @@ public:
 
     // 获取指定用户的昵称，找不到则返回 userId
     Q_INVOKABLE QString getNickname(const QString &userId) const;
+    // 获取指定用户的群内昵称
+    Q_INVOKABLE QString getGroupNickname(const QString &userId) const;
+    // 更新指定用户的群内昵称
+    Q_INVOKABLE void updateGroupNickname(const QString &userId, const QString &groupNickname);
     // 获取指定用户的头像URL
     Q_INVOKABLE QString getAvatar(const QString &userId) const;
     // 获取指定用户的在线状态

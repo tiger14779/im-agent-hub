@@ -314,6 +314,27 @@ void WsClient::queryOnline()
     m_ws.sendTextMessage(QJsonDocument(envelope).toJson(QJsonDocument::Compact));
 }
 
+void WsClient::sendGroupMessage(const QString &groupId, int contentType,
+                                  const QString &content, const QString &clientMsgId)
+{
+    QJsonObject data;
+    data["groupId"] = groupId;
+    data["contentType"] = contentType;
+    data["clientMsgId"] = clientMsgId;
+
+    QJsonDocument contentDoc = QJsonDocument::fromJson(content.toUtf8());
+    if (contentDoc.isObject())
+        data["content"] = contentDoc.object();
+    else
+        data["content"] = content;
+
+    QJsonObject envelope;
+    envelope["type"] = QStringLiteral("send_group_message");
+    envelope["data"] = data;
+
+    m_ws.sendTextMessage(QJsonDocument(envelope).toJson(QJsonDocument::Compact));
+}
+
 void WsClient::handleWsMessage(const QJsonObject &envelope)
 {
     QString type = envelope["type"].toString();
@@ -355,5 +376,27 @@ void WsClient::handleWsMessage(const QJsonObject &envelope)
     } else if (type == "online_list") {
         QJsonArray clients = data["clients"].toArray();
         emit onlineListReceived(clients);
+    } else if (type == "group_member_added") {
+        QString groupId  = data["groupId"].toString();
+        QString userId   = data["userId"].toString();
+        QString nickname = data["nickname"].toString();
+        emit groupMemberAdded(groupId, userId, nickname);
+    } else if (type == "group_member_removed") {
+        QString groupId = data["groupId"].toString();
+        QString userId  = data["userId"].toString();
+        emit groupMemberRemoved(groupId, userId);
+    } else if (type == "group_dissolved") {
+        QString groupId = data["groupId"].toString();
+        emit groupDissolved(groupId);
+    } else if (type == "group_info_updated") {
+        QString groupId = data["groupId"].toString();
+        QString name    = data["name"].toString();
+        QString avatar  = data["avatar"].toString();
+        emit groupInfoUpdated(groupId, name, avatar);
+    } else if (type == "new_group_message") {
+        qDebug() << "[WsClient] new_group_message groupId=" << data["groupId"].toString()
+                 << "sendId=" << data["sendId"].toString()
+                 << "senderName=" << data["senderName"].toString();
+        emit newGroupMessage(data);
     }
 }

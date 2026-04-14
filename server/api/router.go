@@ -65,6 +65,14 @@ func SetupRouter(
 		svc.GET("/contacts", ServiceGetContacts())
 		svc.POST("/contacts", ServiceAddUser(userSvc, chatHub))
 		svc.PUT("/contacts/:userId", ServiceUpdateContact())
+
+		svc.GET("/groups", ServiceListGroups())
+		svc.POST("/groups", ServiceCreateGroup())
+		svc.PUT("/groups/:id", ServiceUpdateGroup(chatHub))
+		svc.GET("/groups/:id/members", ServiceGetGroupMembers())
+		svc.DELETE("/groups/:id", ServiceDissolveGroup(chatHub))
+		svc.POST("/groups/:id/members", ServiceInviteToGroup(chatHub))
+		svc.DELETE("/groups/:id/members/:userId", ServiceKickFromGroup(chatHub))
 	}
 
 	// Admin routes (JWT + admin role required)
@@ -85,6 +93,11 @@ func SetupRouter(
 
 		admin.GET("/settings", GetSettings())
 		admin.PUT("/settings", UpdateSettings())
+
+		admin.GET("/groups", AdminListGroups())
+		admin.POST("/groups", AdminCreateGroup())
+		admin.PUT("/groups/:id", AdminUpdateGroup())
+		admin.DELETE("/groups/:id", AdminDeleteGroup(chatHub))
 	}
 
 	// SPA static files

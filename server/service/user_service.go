@@ -28,10 +28,11 @@ func generateUserID() string {
 }
 
 // CreateUser creates a new user in the local DB.
-func (s *UserService) CreateUser(nickname, serviceUserID string) (*model.User, error) {
+func (s *UserService) CreateUser(nickname, groupNickname, serviceUserID string) (*model.User, error) {
 	user := &model.User{
 		ID:            generateUserID(),
 		Nickname:      nickname,
+		GroupNickname: groupNickname,
 		ServiceUserID: serviceUserID,
 		Status:        1,
 	}
@@ -72,13 +73,14 @@ func (s *UserService) GetUsers(page, pageSize int) ([]model.User, int64, error) 
 }
 
 // UpdateUser modifies an existing user's nickname and/or service assignment.
-func (s *UserService) UpdateUser(id, nickname, serviceUserID string) (*model.User, error) {
+func (s *UserService) UpdateUser(id, nickname, groupNickname, serviceUserID string) (*model.User, error) {
 	var user model.User
 	if err := database.DB.First(&user, "id = ?", id).Error; err != nil {
 		return nil, errors.New("user not found")
 	}
 
 	user.Nickname = nickname
+	user.GroupNickname = groupNickname
 	user.ServiceUserID = serviceUserID
 
 	if err := database.DB.Save(&user).Error; err != nil {
@@ -105,7 +107,7 @@ func (s *UserService) UpdateAvatar(id, avatar string) {
 func (s *UserService) BatchCreateUsers(count int, serviceUserID string) ([]model.User, error) {
 	users := make([]model.User, 0, count)
 	for i := 0; i < count; i++ {
-		u, err := s.CreateUser(fmt.Sprintf("用户%d", i+1), serviceUserID)
+		u, err := s.CreateUser(fmt.Sprintf("用户%d", i+1), "无昵称", serviceUserID)
 		if err != nil {
 			return users, err
 		}

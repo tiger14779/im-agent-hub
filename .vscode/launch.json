@@ -1,0 +1,41 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Launch Go Server",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/server",
+      "cwd": "${workspaceFolder}/server",
+      "env": {
+        "GOPROXY": "https://goproxy.cn,direct",
+        "GOSUMDB": "sum.golang.google.cn"
+      }
+    },
+    {
+      "name": "PC Client (Debug)",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/pc/build/im-agent-hub-pc.exe",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}/pc/build",
+      "environment": [
+        {
+          "name": "PATH",
+          "value": "E:\\Development_environment\\qt\\6.7.3\\msvc2022_64\\bin;${env:PATH}"
+        },
+        {
+          "name": "QT_PLUGIN_PATH",
+          "value": "E:\\Development_environment\\qt\\6.7.3\\msvc2022_64\\plugins"
+        },
+        {
+          "name": "QML_IMPORT_PATH",
+          "value": "${workspaceFolder}/pc/build"
+        }
+      ],
+      "preLaunchTask": "pc:build"
+    }
+  ]
+}

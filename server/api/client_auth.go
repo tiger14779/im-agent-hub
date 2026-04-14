@@ -52,6 +52,27 @@ func ClientLogin(userSvc *service.UserService) gin.HandlerFunc {
 			serviceAvatar = staff.Avatar
 		}
 
+		// Get groups this user is a member of
+		var groupMembers []model.GroupMember
+		database.DB.Where("user_id = ?", user.ID).Find(&groupMembers)
+		type groupInfo struct {
+			GroupID string `json:"groupId"`
+			Name    string `json:"name"`
+			Avatar  string `json:"avatar"`
+		}
+		groupInfoList := make([]groupInfo, 0)
+		if len(groupMembers) > 0 {
+			groupIDs := make([]string, 0, len(groupMembers))
+			for _, gm := range groupMembers {
+				groupIDs = append(groupIDs, gm.GroupID)
+			}
+			var userGroups []model.Group
+			database.DB.Where("id IN ? AND dissolved = ?", groupIDs, false).Find(&userGroups)
+			for _, g := range userGroups {
+				groupInfoList = append(groupInfoList, groupInfo{GroupID: g.ID, Name: g.Name, Avatar: g.Avatar})
+			}
+		}
+
 		pkg.Success(c, gin.H{
 			"token":           token,
 			"userId":          user.ID,
@@ -60,6 +81,7 @@ func ClientLogin(userSvc *service.UserService) gin.HandlerFunc {
 			"serviceUserId":   user.ServiceUserID,
 			"serviceNickname": serviceNickname,
 			"serviceAvatar":   serviceAvatar,
+			"groups":          groupInfoList,
 		})
 	}
 }

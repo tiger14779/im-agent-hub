@@ -37,8 +37,11 @@ QVariant ChatModel::data(const QModelIndex &index, int role) const
     case SendTimeRole:    return msg.sendTime;
     case StatusRole:      return msg.status;
     case IsSelfRole:      return msg.sendID == m_selfId;
+    case SenderNameRole:   return msg.senderName;
+    case SenderAvatarRole: return msg.senderAvatar;
+    case IsGroupRole:      return msg.isGroup;
+    default:               return {};
     }
-    return {};
 }
 
 QHash<int, QByteArray> ChatModel::roleNames() const
@@ -57,6 +60,9 @@ QHash<int, QByteArray> ChatModel::roleNames() const
         { SendTimeRole,    "sendTime" },
         { StatusRole,      "status" },
         { IsSelfRole,      "isSelf" },
+        { SenderNameRole,   "senderName" },
+        { SenderAvatarRole, "senderAvatar" },
+        { IsGroupRole,      "isGroup" },
     };
 }
 
@@ -272,6 +278,11 @@ ChatMessage ChatModel::fromJson(const QJsonObject &obj) const
             m.imageUrl = voiceElem["url"].toString();
         m.voiceDuration = voiceElem["duration"].toInt();
     }
+
+    // 群消息发送者名称/头像和群消息标记
+    m.senderName   = obj["senderName"].toString();
+    m.senderAvatar = obj["senderAvatar"].toString();
+    m.isGroup      = obj["isGroup"].toBool(false);
 
     return m;
 }

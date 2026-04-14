@@ -22,6 +22,8 @@ Item {
     property string avatarUrl: ""      // 头像URL（对方或自己）
     property string serverMsgId: ""    // 服务器消息ID（用于删除）
     property string clientMsgId: ""    // 客户端消息ID
+    property string senderName: ""     // 发送者昵称（群消息使用）
+    property bool isGroup: false        // 是否为群消息
 
     signal imageLoaded()               // 图片加载完成信号（用于通知列表补偿滚动）
     signal deleteRequested(string serverMsgId, string clientMsgId)  // 请求删除消息
@@ -57,7 +59,7 @@ Item {
 
             Label {
                 anchors.centerIn: parent
-                text: isSelf ? "\u6211" : "\u4ED6"
+                text: isSelf ? "\u6211" : (isGroup && senderName.length > 0 ? senderName.charAt(0).toUpperCase() : "\u4ED6")
                 color: "white"
                 font.pixelSize: 14
                 visible: avatarImg.status !== Image.Ready
@@ -68,6 +70,15 @@ Item {
         ColumnLayout {
             spacing: 2
             Layout.maximumWidth: bubble.width * 0.55
+
+            // 群消息发送者名称
+            Label {
+                text: senderName
+                font.pixelSize: 11
+                color: "#888"
+                bottomPadding: 2
+                visible: isGroup && !isSelf && senderName.length > 0
+            }
 
             Rectangle {
                 id: msgBubble

@@ -32,6 +32,7 @@ func ListUsers(svc *service.UserService) gin.HandlerFunc {
 
 type createUserReq struct {
 	Nickname      string `json:"nickname" binding:"required"`
+	GroupNickname string `json:"groupNickname" binding:"required"`
 	ServiceUserID string `json:"serviceUserId" binding:"required"`
 	Avatar        string `json:"avatar"`
 }
@@ -45,7 +46,7 @@ func CreateUser(svc *service.UserService, chatHub *ChatHub) gin.HandlerFunc {
 			return
 		}
 
-		user, err := svc.CreateUser(req.Nickname, req.ServiceUserID)
+		user, err := svc.CreateUser(req.Nickname, req.GroupNickname, req.ServiceUserID)
 		if err != nil {
 			pkg.Fail(c, 500, err.Error())
 			return
@@ -61,6 +62,7 @@ func CreateUser(svc *service.UserService, chatHub *ChatHub) gin.HandlerFunc {
 
 type updateUserReq struct {
 	Nickname      string `json:"nickname" binding:"required"`
+	GroupNickname string `json:"groupNickname" binding:"required"`
 	ServiceUserID string `json:"serviceUserId" binding:"required"`
 	Avatar        string `json:"avatar"`
 }
@@ -75,7 +77,7 @@ func UpdateUser(svc *service.UserService, chatHub *ChatHub) gin.HandlerFunc {
 			return
 		}
 
-		user, err := svc.UpdateUser(id, req.Nickname, req.ServiceUserID)
+		user, err := svc.UpdateUser(id, req.Nickname, req.GroupNickname, req.ServiceUserID)
 		if err != nil {
 			pkg.Fail(c, 404, err.Error())
 			return

@@ -15,35 +15,77 @@
 
     <!-- Chat UI (always rendered so transitions work) -->
     <template v-if="state === 'ready'">
-      <!-- Lottery result -->
-      <LotteryResult />
 
-      <!-- Header -->
-      <header class="chat-header">
-        <button class="back-btn" @click="onBackClick">‹</button>
-        <span class="title">{{ serviceUserName }}</span>
-        <span class="more-btn">···</span>
-      </header>
+      <!-- Conversation list (shown when user has groups and no active chat) -->
+      <template v-if="groups.length > 0 && !activeConversation">
+        <header class="chat-header">
+          <span class="title">消息</span>
+        </header>
+        <div class="user-list">
+          <!-- Service staff 1-on-1 -->
+          <div class="user-list-item" @click="selectConversation(serviceIdRef, serviceUserName, false)">
+            <div class="avatar">{{ serviceUserName.charAt(0) }}</div>
+            <div class="user-list-info">
+              <span class="user-list-name">{{ serviceUserName }}</span>
+              <span class="user-list-id">客服</span>
+            </div>
+          </div>
+          <!-- Groups -->
+          <div
+            v-for="g in groups"
+            :key="g.groupId"
+            class="user-list-item"
+            @click="selectConversation(g.groupId, g.name, true)"
+          >
+            <div class="avatar group-avatar">
+              <img v-if="g.avatar" :src="g.avatar" style="width:100%;height:100%;object-fit:cover;border-radius:inherit" />
+              <span v-else>群</span>
+            </div>
+            <div class="user-list-info">
+              <span class="user-list-name">{{ g.name }}</span>
+              <span class="user-list-id">群聊</span>
+            </div>
+          </div>
+        </div>
+      </template>
 
-      <!-- Message list -->
-      <MessageList
-        :messages="chatStore.messages"
-        :my-id="userStore.userId"
-        :loading-more="loadingMore"
-        :has-more="chatStore.hasMore"
-        :staff-avatar="userStore.serviceAvatar"
-        :staff-name="userStore.serviceNickname"
-        :my-avatar="userStore.avatar"
-        @load-more="onLoadMore"
-      />
+      <!-- Active chat panel (shown when conversation is selected, or no groups) -->
+      <template v-if="activeConversation || groups.length === 0">
+        <!-- Lottery result -->
+        <LotteryResult />
 
-      <!-- Chat input -->
-      <ChatInput
-        @send-text="onSendText"
-        @send-image="onSendImage"
-        @send-file="onSendFile"
-        @send-voice="onSendVoice"
-      />
+        <!-- Group banner notification -->
+        <div v-if="groupBanner" class="group-banner">
+          {{ groupBanner }}
+        </div>
+
+        <!-- Header -->
+        <header class="chat-header">
+          <button class="back-btn" @click="groups.length > 0 ? goBackToList() : onBackClick()">‹</button>
+          <span class="title">{{ activeConversationName || serviceUserName }}</span>
+          <span class="more-btn">···</span>
+        </header>
+
+        <!-- Message list -->
+        <MessageList
+          :messages="chatStore.messages"
+          :my-id="userStore.userId"
+          :loading-more="loadingMore"
+          :has-more="chatStore.hasMore"
+          :staff-avatar="userStore.serviceAvatar"
+          :staff-name="userStore.serviceNickname"
+          :my-avatar="userStore.avatar"
+          @load-more="onLoadMore"
+        />
+
+        <!-- Chat input -->
+        <ChatInput
+          @send-text="onSendText"
+          @send-image="onSendImage"
+          @send-file="onSendFile"
+          @send-voice="onSendVoice"
+        />
+      </template>
     </template>
 
     <!-- Back confirm dialog -->
@@ -85,9 +127,19 @@ const chatStore = useChatStore()
 const state = ref<PageState>('loading')
 const errorMsg = ref('')
 const serviceUserName = ref('客服')
+const serviceIdRef = ref('')
 const loadingMore = ref(false)
 const oldestSeq = ref(0)
+const groupBanner = ref('')   // 群组通知横幅（被踢出 / 群解散）
+
+// Conversation list (groups the user belongs to)
+const groups = ref<{ groupId: string; name: string; avatar: string }[]>([])
+const activeConversation = ref('')           // '' = show list; otherwise = active peer ID
+const activeConversationName = ref('')
+const activeConversationIsGroup = ref(false)
+
 let isSyncing = false // flag: true when reloading history after reconnect
+let pendingHistoryPeer = '' // race guard: expected peerUserId for the next history response
 
 /* ---- Back-navigation guard ---- */
 const showBackConfirm = ref(false)
@@ -159,6 +211,7 @@ async function init() {
       serviceUserId?: string
       serviceNickname?: string
       serviceAvatar?: string
+      groups?: { groupId: string; name: string; avatar: string }[]
     }>('/client/auth/login', { userId: targetId })
 
     userStore.login({
@@ -173,6 +226,8 @@ async function init() {
 
     serviceUserName.value = res.serviceNickname || '客服'
     const serviceId = userStore.serviceUserId || targetId
+    serviceIdRef.value = serviceId
+    groups.value = res.groups || []
 
     if (!userStore.token) {
       throw new Error('登录令牌缺失，请重新进入聊天链接')
@@ -180,7 +235,18 @@ async function init() {
 
     // 2. Setup WebSocket callbacks
     chatWs.onNewMessage = (msg: Message) => {
-      chatStore.addMessage(msg)
+      // Only add to current chat if it matches the active private conversation
+      if (!activeConversationIsGroup.value && activeConversation.value) {
+        chatStore.addMessage(msg)
+      } else if (groups.value.length === 0) {
+        chatStore.addMessage(msg)
+      }
+    }
+
+    chatWs.onNewGroupMessage = (msg) => {
+      if (activeConversationIsGroup.value && activeConversation.value === msg.groupId) {
+        chatStore.addMessage(msg)
+      }
     }
 
     chatWs.onAck = (ack) => {
@@ -195,7 +261,33 @@ async function init() {
       chatStore.removeMessageByServerMsgID(serverMsgId)
     }
 
+    chatWs.onGroupMemberRemoved = (groupId: string, userId: string) => {
+      if (userId === userStore.userId) {
+        groupBanner.value = '您已被移出群聊'
+        // Remove the group from the local list so user knows they left
+        groups.value = groups.value.filter(g => g.groupId !== groupId)
+      }
+    }
+
+    chatWs.onGroupMemberAdded = (gId: string, gName: string, userId: string) => {
+      if (userId === userStore.userId) {
+        // Clear any kick/dissolve banner
+        groupBanner.value = ''
+        // Re-add the group to the list if it's not already there
+        const alreadyListed = groups.value.some(g => g.groupId === gId)
+        if (!alreadyListed) {
+          groups.value.push({ groupId: gId, name: gName || '群聊', avatar: '' })
+        }
+      }
+    }
+
+    chatWs.onGroupDissolved = (_groupId: string) => {
+      groupBanner.value = '该群聊已解散'
+    }
+
     chatWs.onHistory = (data) => {
+      // Discard stale responses that arrived after switching conversations
+      if (data.peerUserId !== pendingHistoryPeer) return
       const msgs = data.messages as unknown as Message[]
       // Parse content for each message
       const parsed = msgs.map(m => {
@@ -239,15 +331,26 @@ async function init() {
     // 4. Sync missed messages on reconnect
     chatWs.onReconnected = () => {
       // Reload history to catch messages received while WS was down
-      isSyncing = true
-      chatWs.loadHistory(serviceId)
+      if (activeConversation.value) {
+        isSyncing = true
+        const peerId = activeConversationIsGroup.value ? 'group_' + activeConversation.value : activeConversation.value
+        pendingHistoryPeer = peerId
+        chatWs.loadHistory(peerId)
+      }
     }
 
     state.value = 'ready'
 
-    // 5. Load recent history
-    chatWs.loadHistory(serviceId)
-    chatWs.markRead(serviceId)
+    // 5. If no groups, open service staff chat directly; otherwise show list
+    if (groups.value.length === 0) {
+      activeConversation.value = serviceId
+      activeConversationName.value = serviceUserName.value
+      activeConversationIsGroup.value = false
+      pendingHistoryPeer = serviceId
+      chatWs.loadHistory(serviceId)
+      chatWs.markRead(serviceId)
+    }
+    // else: leave activeConversation empty so the list is shown
   } catch (err) {
     console.error('[Chat] init failed', err)
     errorMsg.value = (err as Error).message || '连接失败，请重试'
@@ -258,17 +361,54 @@ async function init() {
 function onLoadMore() {
   if (loadingMore.value || !chatStore.hasMore) return
   loadingMore.value = true
-  const serviceId = userStore.serviceUserId || (route.query.id as string)
-  chatWs.loadHistory(serviceId, oldestSeq.value, 50)
+  const peerId = activeConversationIsGroup.value ? 'group_' + activeConversation.value : activeConversation.value
+  chatWs.loadHistory(peerId, oldestSeq.value, 50)
+}
+
+function selectConversation(id: string, name: string, isGroup: boolean) {
+  activeConversation.value = id
+  activeConversationName.value = name
+  activeConversationIsGroup.value = isGroup
+  isSyncing = false
+  chatStore.clearMessages()
+  oldestSeq.value = 0
+  groupBanner.value = ''
+  const peerId = isGroup ? 'group_' + id : id
+  pendingHistoryPeer = peerId
+  chatWs.loadHistory(peerId)
+  if (!isGroup) chatWs.markRead(id)
+}
+
+function goBackToList() {
+  activeConversation.value = ''
+  activeConversationName.value = ''
+  activeConversationIsGroup.value = false
+  chatStore.clearMessages()
 }
 
 function onSendText(text: string) {
-  const serviceId = userStore.serviceUserId || (route.query.id as string)
-  const clientMsgID = chatWs.sendTextMessage(serviceId, text)
+  const peerId = activeConversation.value || serviceIdRef.value
+  if (activeConversationIsGroup.value) {
+    const clientMsgID = chatWs.sendGroupMessage(peerId, text)
+    chatStore.addMessage({
+      clientMsgID,
+      sendID: userStore.userId,
+      recvID: peerId,
+      sessionType: 1,
+      contentType: 101,
+      content: JSON.stringify({ text }),
+      textContent: text,
+      sendTime: Date.now(),
+      status: 1,
+      isGroup: true
+    })
+    return
+  }
+  const clientMsgID = chatWs.sendTextMessage(peerId, text)
   const tempMsg: Message = {
     clientMsgID,
     sendID: userStore.userId,
-    recvID: serviceId,
+    recvID: peerId,
     sessionType: 1,
     contentType: 101,
     content: JSON.stringify({ text }),
@@ -280,13 +420,13 @@ function onSendText(text: string) {
 }
 
 async function onSendImage(file: File) {
-  const serviceId = userStore.serviceUserId || (route.query.id as string)
+  const peerId = activeConversation.value || serviceIdRef.value
   const url = URL.createObjectURL(file)
   const tempMsgID = `tmp_${Date.now()}`
   const tempMsg: Message = {
     clientMsgID: tempMsgID,
     sendID: userStore.userId,
-    recvID: serviceId,
+    recvID: peerId,
     sessionType: 1,
     contentType: 102,
     content: '',
@@ -296,7 +436,7 @@ async function onSendImage(file: File) {
   }
   chatStore.addMessage(tempMsg)
   try {
-    const realId = await chatWs.sendImageMessage(serviceId, file)
+    const realId = await chatWs.sendImageMessage(peerId, file)
     // Update temp msg's clientMsgID to the real one for ACK matching
     const msg = chatStore.messages.find(m => m.clientMsgID === tempMsgID)
     if (msg) msg.clientMsgID = realId
@@ -306,12 +446,12 @@ async function onSendImage(file: File) {
 }
 
 async function onSendFile(file: File) {
-  const serviceId = userStore.serviceUserId || (route.query.id as string)
+  const peerId = activeConversation.value || serviceIdRef.value
   const tempMsgID = `tmp_${Date.now()}`
   const tempMsg: Message = {
     clientMsgID: tempMsgID,
     sendID: userStore.userId,
-    recvID: serviceId,
+    recvID: peerId,
     sessionType: 1,
     contentType: 105,
     content: '',
@@ -321,7 +461,7 @@ async function onSendFile(file: File) {
   }
   chatStore.addMessage(tempMsg)
   try {
-    const realId = await chatWs.sendFileMessage(serviceId, file)
+    const realId = await chatWs.sendFileMessage(peerId, file)
     const msg = chatStore.messages.find(m => m.clientMsgID === tempMsgID)
     if (msg) msg.clientMsgID = realId
   } catch (err) {
@@ -330,13 +470,13 @@ async function onSendFile(file: File) {
 }
 
 async function onSendVoice({ blob, duration }: { blob: Blob; duration: number }) {
-  const serviceId = userStore.serviceUserId || (route.query.id as string)
+  const peerId = activeConversation.value || serviceIdRef.value
   const url = URL.createObjectURL(blob)
   const tempMsgID = `tmp_${Date.now()}`
   const tempMsg: Message = {
     clientMsgID: tempMsgID,
     sendID: userStore.userId,
-    recvID: serviceId,
+    recvID: peerId,
     sessionType: 1,
     contentType: 103,
     content: '',
@@ -346,7 +486,7 @@ async function onSendVoice({ blob, duration }: { blob: Blob; duration: number })
   }
   chatStore.addMessage(tempMsg)
   try {
-    const realId = await chatWs.sendVoiceMessage(serviceId, blob, duration)
+    const realId = await chatWs.sendVoiceMessage(peerId, blob, duration)
     const msg = chatStore.messages.find(m => m.clientMsgID === tempMsgID)
     if (msg) msg.clientMsgID = realId
   } catch (err) {
@@ -367,6 +507,64 @@ onUnmounted(() => {
 
 <style scoped>
 /* All layout styles are in chat.css; only local overrides here */
+
+.user-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0;
+  background: var(--wechat-bg, #ededed);
+}
+
+.user-list-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: #fff;
+  border-bottom: 1px solid var(--wechat-border, #e5e5e5);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.user-list-item:active {
+  background: #d9d9d9;
+}
+
+.user-list-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.user-list-name {
+  font-size: 15px;
+  color: var(--wechat-text, #1a1a1a);
+  font-weight: 500;
+}
+
+.user-list-id {
+  font-size: 12px;
+  color: var(--wechat-text-secondary, #999);
+}
+
+.avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  background: var(--wechat-green, #07c160);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.group-avatar {
+  background: #5b8cff;
+  font-size: 13px;
+}
 
 .back-confirm-mask {
   position: fixed;
@@ -415,5 +613,16 @@ onUnmounted(() => {
 }
 .fade-enter-from, .fade-leave-to {
   opacity: 0;
+}
+.group-banner {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #fff3cd;
+  color: #856404;
+  text-align: center;
+  padding: 8px 16px;
+  font-size: 13px;
+  border-bottom: 1px solid #ffc107;
 }
 </style>
