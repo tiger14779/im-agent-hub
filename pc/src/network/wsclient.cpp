@@ -388,5 +388,15 @@ void WsClient::handleWsMessage(const QJsonObject &envelope)
     } else if (type == "group_dissolved") {
         QString groupId = data["groupId"].toString();
         emit groupDissolved(groupId);
+    } else if (type == "group_info_updated") {
+        QString groupId = data["groupId"].toString();
+        QString name    = data["name"].toString();
+        QString avatar  = data["avatar"].toString();
+        emit groupInfoUpdated(groupId, name, avatar);
+    } else if (type == "new_group_message") {
+        qDebug() << "[WsClient] new_group_message groupId=" << data["groupId"].toString()
+                 << "sendId=" << data["sendId"].toString()
+                 << "senderName=" << data["senderName"].toString();
+        emit newGroupMessage(data);
     }
 }

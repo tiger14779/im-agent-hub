@@ -17,17 +17,51 @@ Drawer {
     property string ownerStaffId: ""        // 群主 staffID，用于判断是否可踢出
     property var members: []                // [{userId, nickname, avatarUrl, role}]
 
+    // 当 members 属性改变时，同步到 ListModel
+    onMembersChanged: {
+        memberListModel.clear()
+        for (var i = 0; i < members.length; i++) {
+            var m = members[i]
+            memberListModel.append({
+                mUserId: m["userId"] || m.userId || "",
+                mNickname: m["nickname"] || m.nickname || "",
+                mAvatarUrl: m["avatarUrl"] || m.avatarUrl || "",
+                mRole: m["role"] || m.role || "member"
+            })
+        }
+    }
+
+    // 内部 ListModel，确保 ListView 正确渲染
+    ListModel { id: memberListModel }
+
+    // 显式填充函数 —— 比 onMembersChanged 更可靠，由 ChatPage.openGroupInfoDrawer 调用
+    function initMembers(arr) {
+        memberListModel.clear()
+        for (var i = 0; i < arr.length; i++) {
+            var m = arr[i]
+            memberListModel.append({
+                mUserId:    String(m.userId    || m["userId"]    || ""),
+                mNickname:  String(m.nickname  || m["nickname"]  || ""),
+                mAvatarUrl: String(m.avatarUrl || m["avatarUrl"] || ""),
+                mRole:      String(m.role      || m["role"]      || "member")
+            })
+        }
+    }
+
     // ── 信号 ──────────────────────────────────────────────────────────────────
     signal inviteMembersClicked()           // 点击「邀请成员」按钮
 
     // ── 主体 ──────────────────────────────────────────────────────────────────
-    ColumnLayout {
+    // 使用锚点布局代替 ColumnLayout+fillHeight，避免 Drawer 在 Page 内时高度循环依赖
+    Item {
         anchors.fill: parent
-        spacing: 0
 
         // 标题栏
         Rectangle {
-            Layout.fillWidth: true
+            id: titleBar
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.right: parent.right
             height: 50
             color: "#f5f5f5"
 
@@ -37,7 +71,7 @@ Drawer {
                 anchors.rightMargin: 12
 
                 Label {
-                    text: groupName + (members.length > 0 ? "(" + members.length + ")" : "")
+                    text: groupName + (memberListModel.count > 0 ? "(" + memberListModel.count + ")" : "")
                     font.pixelSize: 14; font.bold: true; color: "#333"
                     elide: Text.ElideRight
                     Layout.fillWidth: true
@@ -62,7 +96,10 @@ Drawer {
 
         // 邀请成员按钮
         Rectangle {
-            Layout.fillWidth: true
+            id: inviteBar
+            anchors.top: titleBar.bottom
+            anchors.left: parent.left
+            anchors.right: parent.right
             height: 44
             color: "white"
 
@@ -103,7 +140,10 @@ Drawer {
 
         // 成员数量标签
         Rectangle {
-            Layout.fillWidth: true
+            id: countBar
+            anchors.top: inviteBar.bottom
+            anchors.left: parent.left
+            anchors.right: parent.right
             height: 28
             color: "#f8f8f8"
 
@@ -111,26 +151,54 @@ Drawer {
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.leftMargin: 14
-                text: "群成员  " + members.length + " 人"
+                text: "群成员  " + memberListModel.count + " 人"
                 font.pixelSize: 11; color: "#999"
             }
         }
 
-        // 成员列表
+        // 解散群按钮（仅群主可见，锚到底部）
+        Rectangle {
+            id: dissolveBar
+            anchors.bottom: parent.bottom
+            anchors.left: parent.left
+            anchors.right: parent.right
+            height: visible ? 48 : 0
+            color: "white"
+            visible: groupInfoDrawer.ownerStaffId === HttpClient.serviceUserId
+
+            Rectangle {
+                anchors.top: parent.top
+                width: parent.width; height: 1; color: "#f0f0f0"
+            }
+
+            Label {
+                anchors.centerIn: parent
+                text: "解散群组"
+                font.pixelSize: 14; color: "#e74c3c"
+            }
+
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: dissolveConfirmDialog.open()
+            }
+        }
+
+        // 成员列表 —— 锚定在 countBar 和 dissolveBar 之间，充满剩余高度
         ListView {
             id: memberListView
-            Layout.fillWidth: true
-            Layout.fillHeight: true
+            anchors.top: countBar.bottom
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: dissolveBar.top
             clip: true
-            model: groupInfoDrawer.members
+            model: memberListModel
 
             delegate: Rectangle {
                 id: memberDelegate
                 width: memberListView.width
                 height: 50
                 color: memberHover.containsMouse ? "#f0f0f0" : "white"
-
-                required property var modelData
 
                 // 右键菜单（仅非群主可踢出）
                 MouseArea {
@@ -140,9 +208,9 @@ Drawer {
                     acceptedButtons: Qt.RightButton
                     onClicked: function(mouse) {
                         if (mouse.button === Qt.RightButton
-                                && memberDelegate.modelData.role !== "owner") {
-                            kickMenu.targetId   = memberDelegate.modelData.userId
-                            kickMenu.targetNick = memberDelegate.modelData.nickname
+                                && model.mRole !== "owner") {
+                            kickMenu.targetId   = model.mUserId
+                            kickMenu.targetNick = model.mNickname
                             kickMenu.popup()
                         }
                     }
@@ -176,7 +244,7 @@ Drawer {
                         Image {
                             anchors.fill: parent
                             source: {
-                                var u = memberDelegate.modelData.avatarUrl || ""
+                                var u = model.mAvatarUrl || ""
                                 if (u.length > 0 && u.charAt(0) === '/')
                                     return HttpClient.baseUrl + u
                                 return u
@@ -186,14 +254,14 @@ Drawer {
                         }
                         Label {
                             anchors.centerIn: parent
-                            text: (memberDelegate.modelData.nickname || "?").charAt(0).toUpperCase()
+                            text: (model.mNickname || "?").charAt(0).toUpperCase()
                             color: "white"; font.pixelSize: 12; font.bold: true
                             visible: parent.children[0].status !== Image.Ready
                         }
                     }
 
                     Label {
-                        text: memberDelegate.modelData.nickname || memberDelegate.modelData.userId
+                        text: model.mNickname || model.mUserId
                         font.pixelSize: 13; color: "#333"
                         elide: Text.ElideRight
                         Layout.fillWidth: true
@@ -203,7 +271,7 @@ Drawer {
                     Rectangle {
                         width: 28; height: 16; radius: 3
                         color: "#fff3cd"
-                        visible: memberDelegate.modelData.role === "owner"
+                        visible: model.mRole === "owner"
                         Label {
                             anchors.centerIn: parent
                             text: "群主"
@@ -218,31 +286,6 @@ Drawer {
                     anchors.right: parent.right
                     height: 1; color: "#f0f0f0"
                 }
-            }
-        }
-
-        // 解散群按钮（仅群主可见）
-        Rectangle {
-            Layout.fillWidth: true
-            height: 48
-            color: "white"
-            visible: groupInfoDrawer.ownerStaffId === HttpClient.serviceUserId
-
-            Rectangle {
-                anchors.top: parent.top
-                width: parent.width; height: 1; color: "#f0f0f0"
-            }
-
-            Label {
-                anchors.centerIn: parent
-                text: "解散群组"
-                font.pixelSize: 14; color: "#e74c3c"
-            }
-
-            MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onClicked: dissolveConfirmDialog.open()
             }
         }
     }

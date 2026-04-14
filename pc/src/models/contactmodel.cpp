@@ -1,4 +1,5 @@
 #include "contactmodel.h"
+#include <algorithm>
 
 ContactModel::ContactModel(QObject *parent)
     : QAbstractListModel(parent)
@@ -27,6 +28,7 @@ QVariant ContactModel::data(const QModelIndex &index, int role) const
     case OnlineStatusRole: return c.onlineStatus;
     case IsGroupRole:     return c.isGroup;
     case MemberCountRole: return c.memberCount;
+    case GroupNicknameRole: return c.groupNickname;
     }
     return {};
 }
@@ -43,6 +45,7 @@ QHash<int, QByteArray> ContactModel::roleNames() const
         { OnlineStatusRole, "onlineStatus" },
         { IsGroupRole,     "isGroup" },
         { MemberCountRole, "memberCount" },
+        { GroupNicknameRole, "groupNickname" },
     };
 }
 
@@ -59,6 +62,7 @@ void ContactModel::loadFromJson(const QJsonArray &arr, bool isGroup)
         c.unreadCount = obj["unreadCount"].toInt(0);
         c.lastMessage = obj["lastMessage"].toString();
         c.lastTime = static_cast<qint64>(obj["lastTime"].toDouble(0));
+        c.groupNickname = obj["groupNickname"].toString();
         c.isGroup = isGroup;
         if (isGroup) {
             c.userId = obj["id"].toString();
@@ -67,6 +71,10 @@ void ContactModel::loadFromJson(const QJsonArray &arr, bool isGroup)
         }
         m_contacts.append(c);
     }
+    // 按最后消息时间降序排列（有消息的在前，无消息的在后）
+    std::stable_sort(m_contacts.begin(), m_contacts.end(), [](const Contact &a, const Contact &b) {
+        return a.lastTime > b.lastTime;
+    });
     rebuildFilter();
     endResetModel();
     emit countChanged();
@@ -93,6 +101,42 @@ void ContactModel::addOrUpdate(const QString &userId, const QString &nickname,
         bool matches = m_filterText.isEmpty()
             || nickname.contains(m_filterText, Qt::CaseInsensitive)
             || userId.contains(m_filterText, Qt::CaseInsensitive);
+        if (matches) {
+            int newFilteredRow = m_filteredIndices.size();
+            beginInsertRows(QModelIndex(), newFilteredRow, newFilteredRow);
+            m_filteredIndices.append(realIdx);
+            endInsertRows();
+        }
+        emit countChanged();
+    }
+}
+
+void ContactModel::addOrUpdateAsGroup(const QString &groupId, const QString &name, int memberCount, const QString &avatarUrl)
+{
+    int idx = findByUserId(groupId);
+    if (idx >= 0) {
+        m_contacts[idx].nickname    = name;
+        m_contacts[idx].isGroup     = true;
+        m_contacts[idx].memberCount = memberCount;
+        if (!avatarUrl.isEmpty())
+            m_contacts[idx].avatarUrl = avatarUrl;
+        int fRow = filteredRow(idx);
+        if (fRow >= 0) {
+            QModelIndex mi = index(fRow);
+            emit dataChanged(mi, mi, { NicknameRole, IsGroupRole, MemberCountRole, AvatarUrlRole });
+        }
+    } else {
+        int realIdx = m_contacts.size();
+        Contact c;
+        c.userId      = groupId;
+        c.nickname    = name;
+        c.isGroup     = true;
+        c.memberCount = memberCount;
+        c.avatarUrl   = avatarUrl;
+        m_contacts.append(c);
+        bool matches = m_filterText.isEmpty()
+            || name.contains(m_filterText, Qt::CaseInsensitive)
+            || groupId.contains(m_filterText, Qt::CaseInsensitive);
         if (matches) {
             int newFilteredRow = m_filteredIndices.size();
             beginInsertRows(QModelIndex(), newFilteredRow, newFilteredRow);
@@ -195,6 +239,26 @@ QString ContactModel::getNickname(const QString &userId) const
     int idx = findByUserId(userId);
     if (idx < 0) return userId;
     return m_contacts[idx].nickname;
+}
+
+QString ContactModel::getGroupNickname(const QString &userId) const
+{
+    int idx = findByUserId(userId);
+    if (idx < 0) return {};
+    return m_contacts[idx].groupNickname;
+}
+
+void ContactModel::updateGroupNickname(const QString &userId, const QString &groupNickname)
+{
+    int idx = findByUserId(userId);
+    if (idx < 0) return;
+    if (m_contacts[idx].groupNickname == groupNickname) return;
+    m_contacts[idx].groupNickname = groupNickname;
+    int fRow = filteredRow(idx);
+    if (fRow >= 0) {
+        QModelIndex mi = index(fRow);
+        emit dataChanged(mi, mi, { GroupNicknameRole });
+    }
 }
 
 QString ContactModel::getAvatar(const QString &userId) const

@@ -49,10 +49,11 @@ func ServiceLogin() gin.HandlerFunc {
 		type userItem struct {
 			UserID   string `json:"userId"`
 			Nickname string `json:"nickname"`
+			Avatar   string `json:"avatar"`
 		}
 		userList := make([]userItem, 0, len(users))
 		for _, u := range users {
-			userList = append(userList, userItem{UserID: u.ID, Nickname: u.Nickname})
+			userList = append(userList, userItem{UserID: u.ID, Nickname: u.Nickname, Avatar: u.Avatar})
 		}
 
 		pkg.Success(c, gin.H{

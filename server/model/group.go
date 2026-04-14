@@ -6,6 +6,7 @@ import "time"
 type Group struct {
 	ID        string    `gorm:"primaryKey;size:64" json:"id"`
 	Name      string    `gorm:"size:128" json:"name"`
+	Avatar    string    `gorm:"size:512" json:"avatar"`       // group avatar URL
 	OwnerID   string    `gorm:"index;size:64" json:"ownerId"` // ServiceStaff.UserID
 	Dissolved bool      `json:"dissolved"`                    // true after group is disbanded
 	CreatedAt time.Time `json:"createdAt"`

@@ -5,6 +5,7 @@ import (
 	"im-agent-hub/model"
 	"im-agent-hub/pkg"
 	"im-agent-hub/service"
+	"sort"
 
 	"github.com/gin-gonic/gin"
 )
@@ -37,19 +38,21 @@ func ServiceGetContacts() gin.HandlerFunc {
 		}
 
 		type contactItem struct {
-			UserID      string `json:"userId"`
-			Nickname    string `json:"nickname"`
-			Avatar      string `json:"avatar"`
-			UnreadCount int    `json:"unreadCount"`
-			LastMessage string `json:"lastMessage"`
-			LastTime    int64  `json:"lastTime"`
+			UserID        string `json:"userId"`
+			Nickname      string `json:"nickname"`
+			GroupNickname string `json:"groupNickname"`
+			Avatar        string `json:"avatar"`
+			UnreadCount   int    `json:"unreadCount"`
+			LastMessage   string `json:"lastMessage"`
+			LastTime      int64  `json:"lastTime"`
 		}
 		list := make([]contactItem, 0, len(users))
 		for _, u := range users {
 			item := contactItem{
-				UserID:   u.ID,
-				Nickname: u.Nickname,
-				Avatar:   u.Avatar,
+				UserID:        u.ID,
+				Nickname:      u.Nickname,
+				GroupNickname: u.GroupNickname,
+				Avatar:        u.Avatar,
 			}
 			if conv, ok := convMap[u.ID]; ok {
 				if staffID == conv.UserA {
@@ -62,6 +65,11 @@ func ServiceGetContacts() gin.HandlerFunc {
 			}
 			list = append(list, item)
 		}
+
+		// 按最后消息时间降序排列（有消息的在前，无消息的在后）
+		sort.Slice(list, func(i, j int) bool {
+			return list[i].LastTime > list[j].LastTime
+		})
 
 		pkg.Success(c, list)
 	}

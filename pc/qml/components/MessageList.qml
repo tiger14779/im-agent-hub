@@ -159,13 +159,16 @@ ListView {
         sendTime: model.sendTime
         serverMsgId: model.serverMsgID || ""
         clientMsgId: model.clientMsgID || ""
+        senderName: model.senderName || ""
+        isGroup: model.isGroup || false
         avatarUrl: model.isSelf ? (function() {
             var url = msgList.selfAvatarUrl || ""
             if (url.length > 0 && url.charAt(0) === '/')
                 return msgList.serverUrl + url
             return url
         })() : (function() {
-            var url = msgList.peerAvatarUrl || ""
+            // 群消息：使用每条消息的发送者头像；私聊：使用全局 peerAvatarUrl
+            var url = (model.isGroup && model.senderAvatar) ? model.senderAvatar : (msgList.peerAvatarUrl || "")
             if (url.length > 0 && url.charAt(0) === '/')
                 return msgList.serverUrl + url
             return url

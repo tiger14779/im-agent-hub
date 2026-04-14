@@ -58,6 +58,12 @@ public:
     // === 群组管理 ===
     // 获取本客服下的群列表（含成员）: GET /api/service/groups
     Q_INVOKABLE void getGroups();
+    // 获取指定群的成员列表: GET /api/service/groups/:id/members
+    Q_INVOKABLE void getGroupMembers(const QString &groupId);
+    // 创建新群组: POST /api/service/groups
+    Q_INVOKABLE void createGroup(const QString &name);
+    // 更新群名称/头像（仅群主）: PUT /api/service/groups/:groupId
+    Q_INVOKABLE void updateGroup(const QString &groupId, const QString &name, const QString &avatar);
     // 邀请用户入群: POST /api/service/groups/:groupId/members
     Q_INVOKABLE void inviteToGroup(const QString &groupId, const QString &userId);
     // 踢出群成员: DELETE /api/service/groups/:groupId/members/:userId
@@ -124,6 +130,9 @@ signals:
 
     // ── 群组相关信号 ──
     void groupsLoaded(const QJsonArray &groups);     // 群列表加载完成
+    void groupMembersLoaded(const QString &groupId, const QVariantList &members); // 群成员列表加载完成
+    void groupCreated();                             // 创建群组成功
+    void groupUpdated(const QString &groupId);       // 更新群信息成功
     void groupMemberChanged(const QString &groupId); // 群成员变化（邀请/踢出后刷新）
     void groupError(const QString &error);           // 群操作失败
 

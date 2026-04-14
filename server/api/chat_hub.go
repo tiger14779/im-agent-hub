@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -402,7 +403,13 @@ func (h *ChatHub) handleLoadHistory(cc *ChatConn, data json.RawMessage) {
 		return
 	}
 
-	convID := service.MakeConversationID(cc.userID, req.PeerUserID)
+	// 群会话直接用 peerUserId 作为 convID（格式："group_<groupId>"）
+	var convID string
+	if strings.HasPrefix(req.PeerUserID, "group_") {
+		convID = req.PeerUserID
+	} else {
+		convID = service.MakeConversationID(cc.userID, req.PeerUserID)
+	}
 	msgs, err := h.msgSvc.GetHistory(convID, req.BeforeSeq, req.Limit)
 
 	resp := map[string]interface{}{
@@ -679,21 +686,24 @@ func (h *ChatHub) handleSendGroupMessage(cc *ChatConn, data json.RawMessage) {
 		}
 	}
 
-	// Determine sender display name (fixed at send time)
+	// Determine sender display name and avatar (fixed at send time)
 	senderName := ""
+	senderAvatar := ""
 	var u model.User
 	if err := database.DB.First(&u, "id = ?", cc.userID).Error; err == nil {
 		senderName = u.GroupNickname
+		senderAvatar = u.Avatar
 	} else {
 		// sender is staff
 		var s model.ServiceStaff
 		if err2 := database.DB.First(&s, "user_id = ?", cc.userID).Error; err2 == nil {
 			senderName = s.Nickname
+			senderAvatar = s.Avatar
 		}
 	}
 
-	// Save group message — RecvID = groupID, IsGroup = true, SenderName fixed
-	msg, isDup, err := h.msgSvc.SaveGroupMessage(cc.userID, req.GroupID, req.ContentType, contentStr, req.ClientMsgID, senderName)
+	// Save group message — RecvID = groupID, IsGroup = true, SenderName/Avatar fixed
+	msg, isDup, err := h.msgSvc.SaveGroupMessage(cc.userID, req.GroupID, req.ContentType, contentStr, req.ClientMsgID, senderName, senderAvatar)
 	if err != nil {
 		log.Printf("[WS] save group message error: %v", err)
 		h.sendToUser(cc.userID, map[string]interface{}{
@@ -739,6 +749,7 @@ func (h *ChatHub) handleSendGroupMessage(cc *ChatConn, data json.RawMessage) {
 			"memberCount":    memberCnt,
 			"sendID":         msg.SendID,
 			"senderName":     msg.SenderName,
+			"senderAvatar":   msg.SenderAvatar,
 			"contentType":    msg.ContentType,
 			"content":        msg.Content,
 			"sendTime":       msg.SendTime,

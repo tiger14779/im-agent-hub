@@ -67,6 +67,9 @@ func SetupRouter(
 		svc.PUT("/contacts/:userId", ServiceUpdateContact())
 
 		svc.GET("/groups", ServiceListGroups())
+		svc.POST("/groups", ServiceCreateGroup())
+		svc.PUT("/groups/:id", ServiceUpdateGroup(chatHub))
+		svc.GET("/groups/:id/members", ServiceGetGroupMembers())
 		svc.DELETE("/groups/:id", ServiceDissolveGroup(chatHub))
 		svc.POST("/groups/:id/members", ServiceInviteToGroup(chatHub))
 		svc.DELETE("/groups/:id/members/:userId", ServiceKickFromGroup(chatHub))
@@ -93,6 +96,7 @@ func SetupRouter(
 
 		admin.GET("/groups", AdminListGroups())
 		admin.POST("/groups", AdminCreateGroup())
+		admin.PUT("/groups/:id", AdminUpdateGroup())
 		admin.DELETE("/groups/:id", AdminDeleteGroup(chatHub))
 	}
 

@@ -53,7 +53,7 @@ Page {
             if (!loadingMore && !_mergeMode) {
                 console.log("[ChatPage] periodic sync for", activeChatId)
                 _mergeMode = true
-                WsClient.loadHistory(activeChatId, 0, 20)
+                WsClient.loadHistory(historyPeerId(), 0, 20)
             }
         }
     }
@@ -69,6 +69,11 @@ Page {
         if (url && url.length > 0 && url.charAt(0) === '/')
             return HttpClient.baseUrl + url
         return url ?? ""
+    }
+
+    // 获取当前会话的历史记录请求标识（群聊需加 "group_" 前缀使前缀匹配 convID）
+    function historyPeerId() {
+        return activeChatIsGroup ? "group_" + activeChatId : activeChatId
     }
 
     // 页面初始化
@@ -322,6 +327,20 @@ Page {
                             }
                             onClicked: addContactDialog.open()
                         }
+
+                        // 创建群组按钮（仅在群组Tab显示）
+                        RoundButton {
+                            visible: currentTab === 2
+                            width: 28; height: 28; radius: 14
+                            flat: true
+                            contentItem: Label {
+                                text: "+"
+                                font.pixelSize: 18; color: "#555"
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            onClicked: createGroupDialog.open()
+                        }
                     }
 
                     // 底部分割线
@@ -401,13 +420,19 @@ Page {
                     activeUserId: activeChatId
                     serverUrl: HttpClient.baseUrl
                     onContactClicked: function(cUserId) {
-                        activeChatIsGroup = false
-                        openChat(cUserId)
+                        // 群组也在聊天列表中，点击时路由到群聊
+                        if (cUserId.startsWith("group_")) {
+                            openGroupChat(cUserId)
+                        } else {
+                            activeChatIsGroup = false
+                            openChat(cUserId)
+                        }
                     }
                     onContactRightClicked: function(cUserId) {
                         contextUserId = cUserId
                         // Show edit dialog
                         editRemarkField.text = contactModel.getNickname(cUserId)
+                        editGroupNicknameField.text = contactModel.getGroupNickname(cUserId)
                         editAvatarField.text = contactModel.getAvatar(cUserId)
                         editContactDialog.open()
                     }
@@ -415,6 +440,14 @@ Page {
                         inviteToGroupDialog.targetUserId   = userId
                         inviteToGroupDialog.targetNickname = contactModel.getNickname(userId)
                         inviteToGroupDialog.open()
+                    }
+                    onGroupInfoRequested: function(groupId) {
+                        contextGroupId = groupId
+                        openGroupInfoDrawer(groupId)
+                    }
+                    onGroupEditRequested: function(groupId) {
+                        contextGroupId = groupId
+                        openEditGroupDialog(groupId)
                     }
                 }
 
@@ -432,6 +465,10 @@ Page {
                     onGroupInfoRequested: function(groupId) {
                         contextGroupId = groupId
                         openGroupInfoDrawer(groupId)
+                    }
+                    onGroupEditRequested: function(groupId) {
+                        contextGroupId = groupId
+                        openEditGroupDialog(groupId)
                     }
                 }
             }
@@ -495,13 +532,14 @@ Page {
                             font.pixelSize: 15; font.bold: true; color: "#333"
                         }
 
-                        // 在线状态指示器（仅私聊显示）
+                        // 在线状态指示器（私聊显在线状态，群聊显示“群”标签）
                         Rectangle {
                             width: statusRow.implicitWidth + 12
                             height: 20
                             radius: 10
-                            visible: !activeChatIsGroup && activeChatOnlineStatus.length > 0
-                            color: activeChatOnlineStatus === "online" ? "#e8f5e9"
+                            visible: activeChatIsGroup || (!activeChatIsGroup && activeChatOnlineStatus.length > 0)
+                            color: activeChatIsGroup ? "#e8f0fe"
+                                 : activeChatOnlineStatus === "online" ? "#e8f5e9"
                                  : activeChatOnlineStatus === "background" ? "#fff3e0" : "#f5f5f5"
 
                             Row {
@@ -512,15 +550,18 @@ Page {
                                 Rectangle {
                                     width: 8; height: 8; radius: 4
                                     anchors.verticalCenter: parent.verticalCenter
+                                    visible: !activeChatIsGroup
                                     color: activeChatOnlineStatus === "online" ? "#4caf50"
                                          : activeChatOnlineStatus === "background" ? "#ff9800" : "#bdbdbd"
                                 }
 
                                 Label {
-                                    text: activeChatOnlineStatus === "online" ? "在线"
+                                    text: activeChatIsGroup ? "群"
+                                        : activeChatOnlineStatus === "online" ? "在线"
                                         : activeChatOnlineStatus === "background" ? "后台" : "离线"
                                     font.pixelSize: 11
-                                    color: activeChatOnlineStatus === "online" ? "#2e7d32"
+                                    color: activeChatIsGroup ? "#3c5bde"
+                                         : activeChatOnlineStatus === "online" ? "#2e7d32"
                                          : activeChatOnlineStatus === "background" ? "#e65100" : "#757575"
                                 }
                             }
@@ -627,6 +668,7 @@ Page {
     // ── 群组信息抽屉 ─────────────────────────────
     GroupInfoDrawer {
         id: groupInfoDrawer
+        height: chatRoot.height   // Drawer 在 Page 内需要显式绑定高度，否则默认 0
         // 将 Drawer 绑定在右侧聊天区域（Page 坐标）
         // Drawer 会从整个 Page 的右边缘推入
         onInviteMembersClicked: {
@@ -658,7 +700,10 @@ Page {
         property string targetNickname: ""
         property string selectedGroupId: ""
 
-        onOpened: { selectedGroupId = "" }
+        onOpened: {
+            selectedGroupId = ""
+            HttpClient.getGroups()   // 每次打开时刷新群列表
+        }
 
         ColumnLayout {
             width: parent.width; spacing: 0
@@ -672,23 +717,41 @@ Page {
             ListView {
                 id: groupPickList
                 Layout.fillWidth: true
-                height: Math.min(contentHeight, 200)
+                Layout.preferredHeight: Math.min(contentHeight, 200)
                 clip: true
-                model: groupModel
+
+                // 使用 JS 数组作为模型，从 groupsData 实时构建
+                model: {
+                    var result = []
+                    for (var i = 0; i < groupsData.length; i++) {
+                        var g = groupsData[i]
+                        if (g["dissolved"] === true) continue
+                        result.push({
+                            groupId: g["id"] || "",
+                            groupName: g["name"] || "",
+                            memberCount: g["memberCount"] || 0
+                        })
+                    }
+                    return result
+                }
 
                 delegate: Rectangle {
                     width: groupPickList.width
                     height: 44
-                    color: model.userId === inviteToGroupDialog.selectedGroupId ? "#e8f7ee"
-                           : (gpHover.containsMouse ? "#f5f5f5" : "white")
                     radius: 4
+
+                    required property var modelData
+                    required property int index
+
+                    color: modelData.groupId === inviteToGroupDialog.selectedGroupId ? "#e8f7ee"
+                           : (gpHover.containsMouse ? "#f5f5f5" : "white")
 
                     MouseArea {
                         id: gpHover
                         anchors.fill: parent
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: inviteToGroupDialog.selectedGroupId = model.userId
+                        onClicked: inviteToGroupDialog.selectedGroupId = parent.modelData.groupId
                     }
 
                     RowLayout {
@@ -697,7 +760,7 @@ Page {
                         anchors.rightMargin: 12
 
                         Label {
-                            text: model.nickname + (model.memberCount > 0 ? "(" + model.memberCount + ")" : "")
+                            text: modelData.groupName + (modelData.memberCount > 0 ? "(" + modelData.memberCount + ")" : "")
                             font.pixelSize: 13; color: "#333"
                             Layout.fillWidth: true
                             elide: Text.ElideRight
@@ -706,7 +769,7 @@ Page {
                         Label {
                             text: "✓"
                             font.pixelSize: 14; color: "#07c160"
-                            visible: model.userId === inviteToGroupDialog.selectedGroupId
+                            visible: modelData.groupId === inviteToGroupDialog.selectedGroupId
                         }
                     }
 
@@ -718,7 +781,7 @@ Page {
 
                 Label {
                     anchors.centerIn: parent
-                    text: "暂无群组"
+                    text: "暂无群组，请先创建群"
                     color: "#bbb"; font.pixelSize: 13
                     visible: groupPickList.count === 0
                 }
@@ -732,12 +795,51 @@ Page {
         }
     }
 
+    // ── 创建群组对话框 ──────────────────────────────
+    Dialog {
+        id: createGroupDialog
+        title: "创建群组"
+        anchors.centerIn: parent
+        modal: true; width: 300
+
+        ColumnLayout {
+            width: parent.width; spacing: 12
+
+            Label {
+                text: "请输入群组名称："
+                font.pixelSize: 13; color: "#666"
+            }
+
+            TextField {
+                id: newGroupNameField
+                Layout.fillWidth: true
+                placeholderText: "群组名称"
+                font.pixelSize: 14
+                maximumLength: 30
+            }
+        }
+
+        onOpened: {
+            newGroupNameField.text = ""
+            newGroupNameField.forceActiveFocus()
+        }
+
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        onAccepted: {
+            var name = newGroupNameField.text.trim()
+            if (name.length > 0) {
+                HttpClient.createGroup(name)
+            }
+        }
+    }
+
     // ── 对话框 ───────────────────────────────────
 
     property string contextUserId: ""         // 右键菜单选中的用户ID
     property string pendingAvatarUrl: ""      // 添加对话框的待上传头像URL
     property string editPendingAvatarUrl: ""  // 编辑对话框的待上传头像URL
     property string pendingProfileAvatarUrl: ""  // 个人资料对话框的待上传头像URL
+    property string pendingGroupAvatarUrl: ""    // 编辑群对话框的待上传头像URL
 
     // 头像文件选择器（添加/编辑共用）
     FileDialog {
@@ -757,6 +859,8 @@ Page {
                 pendingAvatarUrl = url
             } else if (avatarFileDialog.target === "profile") {
                 pendingProfileAvatarUrl = url
+            } else if (avatarFileDialog.target === "editGroup") {
+                pendingGroupAvatarUrl = url
             } else {
                 editPendingAvatarUrl = url
             }
@@ -1004,6 +1108,7 @@ Page {
         }
         onRejected: {
             editPendingAvatarUrl = ""
+            editGroupNicknameField.text = ""
         }
     }
 
@@ -1089,7 +1194,101 @@ Page {
         }
     }
 
+    // ── 编辑群信息对话框 ────────────────────
+    Dialog {
+        id: editGroupDialog
+        title: "编辑群信息"
+        anchors.centerIn: parent
+        modal: true; width: 320
+
+        property string editingGroupId: ""
+        property string originalAvatar: ""
+
+        ColumnLayout {
+            width: parent.width; spacing: 12
+
+            // 头像预览 + 上传按钮
+            RowLayout {
+                Layout.alignment: Qt.AlignHCenter
+                spacing: 12
+                Rectangle {
+                    width: 64; height: 64; radius: 8
+                    color: "#1a73e8"
+                    clip: true
+                    Image {
+                        anchors.fill: parent
+                        source: {
+                            var url = pendingGroupAvatarUrl.length > 0
+                                      ? pendingGroupAvatarUrl
+                                      : editGroupDialog.originalAvatar
+                            return url.length > 0 ? (url.charAt(0) === '/' ? HttpClient.baseUrl + url : url) : ""
+                        }
+                        visible: status === Image.Ready
+                        fillMode: Image.PreserveAspectCrop
+                    }
+                    Label {
+                        anchors.centerIn: parent
+                        text: (editGroupNameField.text || "G").charAt(0).toUpperCase()
+                        color: "white"; font.pixelSize: 22; font.bold: true
+                        visible: {
+                            var url = pendingGroupAvatarUrl.length > 0
+                                      ? pendingGroupAvatarUrl
+                                      : editGroupDialog.originalAvatar
+                            return url.length === 0
+                        }
+                    }
+                }
+                Button {
+                    text: "上传头像"
+                    onClicked: {
+                        avatarFileDialog.target = "editGroup"
+                        avatarFileDialog.open()
+                    }
+                }
+            }
+
+            Label { text: "群名称："; font.pixelSize: 13; color: "#666" }
+
+            TextField {
+                id: editGroupNameField
+                Layout.fillWidth: true
+                placeholderText: "群名称"
+                font.pixelSize: 14
+                maximumLength: 30
+            }
+        }
+
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        onAccepted: {
+            var name = editGroupNameField.text.trim()
+            var avatar = pendingGroupAvatarUrl.length > 0 ? pendingGroupAvatarUrl : editGroupDialog.originalAvatar
+            if (name.length > 0 && editGroupDialog.editingGroupId.length > 0) {
+                HttpClient.updateGroup(editGroupDialog.editingGroupId, name, avatar)
+            }
+            pendingGroupAvatarUrl = ""
+        }
+        onRejected: {
+            pendingGroupAvatarUrl = ""
+        }
+    }
+
     // ── Functions ────────────────────────────────────────
+
+    function openEditGroupDialog(groupId) {
+        var gdata = null
+        for (var i = 0; i < groupsData.length; i++) {
+            if ((groupsData[i]["id"] || "") === groupId) {
+                gdata = groupsData[i]
+                break
+            }
+        }
+        if (!gdata) return
+        editGroupDialog.editingGroupId = groupId
+        editGroupDialog.originalAvatar = gdata["avatar"] || ""
+        editGroupNameField.text = gdata["name"] || ""
+        pendingGroupAvatarUrl = ""
+        editGroupDialog.open()
+    }
 
     function openChat(userId) {
         console.log("[ChatPage] openChat:", userId, "wsConnected:", WsClient.connected)
@@ -1130,8 +1329,8 @@ Page {
         hasMoreHistory = true
         loadingMore = false
         _mergeMode = false
-        // 加载群历史消息（后端通过 conversationID="group_groupId" 查找）
-        WsClient.loadHistory(groupId)
+        // 加载群历史消息（后端通过 conversationID="group_groupId" 查找，需再加一层前缀）
+        WsClient.loadHistory("group_" + groupId)
     }
 
     // 打开群信息抽屉
@@ -1147,8 +1346,11 @@ Page {
         groupInfoDrawer.groupId    = groupId
         groupInfoDrawer.groupName  = gdata["name"] || groupId
         groupInfoDrawer.ownerStaffId = gdata["ownerId"] || ""
-        groupInfoDrawer.members    = gdata["members"] || []
+
+        // 清空旧成员，发起专用 API 请求获取最新成员列表
+        groupInfoDrawer.initMembers([])
         groupInfoDrawer.open()
+        HttpClient.getGroupMembers(groupId)
     }
 
     function sendTextMessage(text) {
@@ -1175,7 +1377,7 @@ Page {
     function loadMoreHistory() {
         if (loadingMore || !hasMoreHistory || !activeChatId) return
         loadingMore = true
-        WsClient.loadHistory(activeChatId, oldestSeq, 50)
+        WsClient.loadHistory(historyPeerId(), oldestSeq, 50)
     }
 
     function sendImageMessage(filePath) {
@@ -1197,17 +1399,85 @@ Page {
         function onContactsLoaded(contacts) {
             contactsArray = contacts   // 保存原始数组供邀请对话框使用
             contactModel.loadFromJson(contacts)
+            // loadFromJson 会清空 model（包含之前添加的群组），需要将群组重新同步进来
+            for (var k = 0; k < groupsData.length; k++) {
+                if (!groupsData[k].dissolved) {
+                    contactModel.addOrUpdateAsGroup(
+                        groupsData[k].id, groupsData[k].name, groupsData[k].memberCount, groupsData[k].avatar || "")
+                }
+            }
         }
         // 群组列表加载完成
         function onGroupsLoaded(groups) {
-            groupsData = groups
+            // 将 QJsonArray 深拷贝为纯 JS 数组，确保后续属性访问正常
+            var clean = []
+            for (var i = 0; i < groups.length; i++) {
+                var g = groups[i]
+                var members = []
+                var rawM = g["members"] || []
+                for (var j = 0; j < rawM.length; j++) {
+                    var m = rawM[j]
+                    members.push({
+                        userId:    String(m["userId"]    || ""),
+                        nickname:  String(m["nickname"]  || ""),
+                        avatarUrl: String(m["avatarUrl"] || ""),
+                        role:      String(m["role"]      || "member")
+                    })
+                }
+                clean.push({
+                    id:          String(g["id"]          || ""),
+                    name:        String(g["name"]        || ""),
+                    avatar:      String(g["avatar"]      || ""),
+                    ownerId:     String(g["ownerId"]     || ""),
+                    dissolved:   !!g["dissolved"],
+                    memberCount: Number(g["memberCount"] || 0),
+                    members:     members
+                })
+            }
+            groupsData = clean
             groupModel.loadFromJson(groups, true)
+            // 同步群组到聊天列表（tab 0）
+            for (var k = 0; k < clean.length; k++) {
+                if (!clean[k].dissolved) {
+                    contactModel.addOrUpdateAsGroup(clean[k].id, clean[k].name, clean[k].memberCount, clean[k].avatar || "")
+                }
+            }
             // 若群信息抽屉已打开，刷新成员数据
             if (groupInfoDrawer.position > 0 && groupInfoDrawer.groupId.length > 0)
-                openGroupInfoDrawer(groupInfoDrawer.groupId)
+                HttpClient.getGroupMembers(groupInfoDrawer.groupId)
+        }
+        // 群成员列表加载完成（打开群信息抽屉时专用请求）
+        function onGroupMembersLoaded(groupId, members) {
+            if (groupInfoDrawer.groupId !== groupId) return
+            // members 是 QVariantList → 在 QML 中为原生 JS 数组，每项是 QVariantMap → 原生 JS 对象
+            var cleanMembers = []
+            for (var i = 0; i < members.length; i++) {
+                var m = members[i]
+                cleanMembers.push({
+                    userId:    String(m.userId    || ""),
+                    nickname:  String(m.nickname  || ""),
+                    avatarUrl: String(m.avatarUrl || ""),
+                    role:      String(m.role      || "member")
+                })
+            }
+            groupInfoDrawer.members = cleanMembers
+            groupInfoDrawer.initMembers(cleanMembers)
+        }
+
+        // 群组加载失败
+        function onGroupError(err) {
+            console.warn("[ChatPage] getGroups error:", err)
         }
         // 群成员变动（邀请/踢出），刷新群列表
         function onGroupMemberChanged(groupId) {
+            HttpClient.getGroups()
+        }
+        // 创建群组成功，刷新群列表
+        function onGroupCreated() {
+            HttpClient.getGroups()
+        }
+        // 更新群信息成功，刷新群列表
+        function onGroupUpdated(groupId) {
             HttpClient.getGroups()
         }
         // 新增联系人成功
@@ -1216,12 +1486,14 @@ Page {
                 contact["userId"], contact["nickname"],
                 contact["avatar"] ?? ""
             )
+            contactModel.updateGroupNickname(contact["userId"], contact["groupNickname"] ?? "")
         }
         // 更新联系人成功
         function onContactUpdated(contact) {
             var uid = contact["userId"]
             contactModel.updateNickname(uid, contact["nickname"] ?? "")
             contactModel.updateAvatar(uid, contact["avatar"] ?? "")
+            contactModel.updateGroupNickname(uid, contact["groupNickname"] ?? "")
             if (uid === activeChatId) {
                 activeChatName = contactModel.getNickname(uid)
             }
@@ -1451,7 +1723,7 @@ Page {
             console.log("[ChatPage] onHistoryLoaded peer:", peerUserId,
                         "active:", activeChatId, "msgCount:", messages.length,
                         "hasMore:", hasMore, "merge:", _mergeMode)
-            if (peerUserId !== activeChatId) {
+            if (peerUserId !== historyPeerId()) {
                 _mergeMode = false
                 return
             }
@@ -1473,6 +1745,9 @@ Page {
                     "contentType": ct,
                     "sendTime": m["sendTime"] ?? 0,
                     "status": 2,
+                    "senderName": m["senderName"] ?? "",
+                    "senderAvatar": m["senderAvatar"] ?? "",
+                    "isGroup": m["isGroup"] ?? false,
                     "textElem": ct === 101 ? p : undefined,
                     "content": ct === 101 ? (p["text"] ?? p["content"] ?? contentStr) : undefined,
                     "pictureElem": ct === 102 ? (function() {
@@ -1538,7 +1813,7 @@ Page {
                 if (activeChatId) {
                     console.log("[ChatPage] WS reconnected, syncing history for", activeChatId)
                     _mergeMode = true
-                    WsClient.loadHistory(activeChatId, 0, 50)
+                    WsClient.loadHistory(historyPeerId(), 0, 50)
                 }
             }
         }
@@ -1598,6 +1873,7 @@ Page {
                 "sendID": senderId,
                 "recvID": groupId,
                 "senderName": senderName,
+                "senderAvatar": msg["senderAvatar"] ?? "",
                 "isGroup": true,
                 "contentType": contentType,
                 "sendTime": msg["sendTime"] ?? Date.now(),
@@ -1632,6 +1908,11 @@ Page {
             groupModel.updateLastMessage(groupId, preview, msg["sendTime"] ?? Date.now())
             if (groupId !== activeChatId)
                 groupModel.incrementUnread(groupId)
+
+            // 同步到聊天列表（tab 0）
+            contactModel.updateLastMessage(groupId, preview, msg["sendTime"] ?? Date.now())
+            if (groupId !== activeChatId)
+                contactModel.incrementUnread(groupId)
         }
 
         // 群成员被加入
@@ -1665,6 +1946,29 @@ Page {
                 if (groupInfoDrawer.position > 0) groupInfoDrawer.close()
             }
             HttpClient.getGroups()
+        }
+        function onGroupInfoUpdated(groupId, name, avatar) {
+            console.log("[ChatPage] groupInfoUpdated:", groupId, name, avatar)
+            // 更新 groupsData 缓存
+            var memberCount = 0
+            for (var i = 0; i < groupsData.length; i++) {
+                if (groupsData[i].id === groupId) {
+                    var g = groupsData[i]
+                    memberCount = g.memberCount || 0
+                    g.name   = name
+                    g.avatar = avatar
+                    groupsData[i] = g
+                    break
+                }
+            }
+            // 更新两个 model 的展示
+            contactModel.addOrUpdateAsGroup(groupId, name, memberCount, avatar)
+            groupModel.updateNickname(groupId, name)
+            groupModel.updateAvatar(groupId, avatar)
+            // 若正在聊天，同步更新标题
+            if (groupId === activeChatId && activeChatIsGroup) {
+                activeChatName = name
+            }
         }
     }
 

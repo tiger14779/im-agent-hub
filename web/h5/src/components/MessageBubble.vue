@@ -2,16 +2,21 @@
   <div class="message-item" :class="isSelf ? 'self' : 'other'">
     <!-- Avatar -->
     <div class="avatar">
-      <img
-        v-if="isSelf && myAvatar"
-        :src="myAvatar"
-      />
-      <img
-        v-else-if="!isSelf && staffAvatar"
-        :src="staffAvatar"
-      />
+      <!-- 自己的头像 -->
+      <img v-if="isSelf && myAvatar" :src="myAvatar" />
+      <!-- 群消息：有头像就显示图片，否则显示文字首字母 -->
+      <img v-else-if="!isSelf && message.isGroup && message.senderAvatar" :src="message.senderAvatar" />
+      <!-- 私聊（非群）对方头像 -->
+      <img v-else-if="!isSelf && !message.isGroup && staffAvatar" :src="staffAvatar" />
+      <!-- 文字兜底 -->
       <template v-else>
-        {{ isSelf ? '我' : (staffName ? staffName.charAt(0) : '客') }}
+        {{
+          isSelf
+            ? '我'
+            : message.isGroup
+              ? (message.senderName?.charAt(0) || '?')
+              : (staffName ? staffName.charAt(0) : '客')
+        }}
       </template>
     </div>
 

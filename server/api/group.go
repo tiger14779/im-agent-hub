@@ -24,6 +24,7 @@ func generateGroupID() string {
 type groupItem struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
+	Avatar      string `json:"avatar"`
 	OwnerID     string `json:"ownerId"`
 	Dissolved   bool   `json:"dissolved"`
 	MemberCount int    `json:"memberCount"`
@@ -36,6 +37,7 @@ func buildGroupItem(g model.Group) groupItem {
 	return groupItem{
 		ID:          g.ID,
 		Name:        g.Name,
+		Avatar:      g.Avatar,
 		OwnerID:     g.OwnerID,
 		Dissolved:   g.Dissolved,
 		MemberCount: int(cnt),
@@ -67,6 +69,7 @@ func AdminCreateGroup() gin.HandlerFunc {
 		var req struct {
 			Name    string `json:"name" binding:"required"`
 			OwnerID string `json:"ownerId" binding:"required"`
+			Avatar  string `json:"avatar"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			pkg.Fail(c, 400, "name and ownerId are required")
@@ -81,6 +84,7 @@ func AdminCreateGroup() gin.HandlerFunc {
 		g := model.Group{
 			ID:      generateGroupID(),
 			Name:    req.Name,
+			Avatar:  req.Avatar,
 			OwnerID: req.OwnerID,
 		}
 		if err := database.DB.Create(&g).Error; err != nil {
@@ -94,6 +98,38 @@ func AdminCreateGroup() gin.HandlerFunc {
 			Role:     "owner",
 			JoinedAt: time.Now(),
 		})
+		pkg.Success(c, buildGroupItem(g))
+	}
+}
+
+// AdminUpdateGroup handles PUT /api/admin/groups/:id
+func AdminUpdateGroup() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := c.Param("id")
+		var req struct {
+			Name   *string `json:"name"`
+			Avatar *string `json:"avatar"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			pkg.Fail(c, 400, err.Error())
+			return
+		}
+		var g model.Group
+		if err := database.DB.First(&g, "id = ?", id).Error; err != nil {
+			pkg.Fail(c, 404, "group not found")
+			return
+		}
+		updates := map[string]interface{}{}
+		if req.Name != nil {
+			updates["name"] = *req.Name
+		}
+		if req.Avatar != nil {
+			updates["avatar"] = *req.Avatar
+		}
+		if len(updates) > 0 {
+			database.DB.Model(&g).Updates(updates)
+			database.DB.First(&g, "id = ?", id)
+		}
 		pkg.Success(c, buildGroupItem(g))
 	}
 }
@@ -121,6 +157,87 @@ func AdminDeleteGroup(chatHub *ChatHub) gin.HandlerFunc {
 
 // ── Service (PC staff) handlers ──────────────────────────────────────────────
 
+// ServiceUpdateGroup handles PUT /api/service/groups/:id
+// Only the group owner (staff) can update the group name and/or avatar.
+func ServiceUpdateGroup(chatHub *ChatHub) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		staffID := c.GetString("serviceUserId")
+		groupID := c.Param("id")
+
+		var req struct {
+			Name   *string `json:"name"`
+			Avatar *string `json:"avatar"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			pkg.Fail(c, 400, err.Error())
+			return
+		}
+
+		var g model.Group
+		if err := database.DB.First(&g, "id = ? AND dissolved = false", groupID).Error; err != nil {
+			pkg.Fail(c, 404, "group not found or dissolved")
+			return
+		}
+		if g.OwnerID != staffID {
+			pkg.Fail(c, 403, "only the group owner can update group info")
+			return
+		}
+
+		updates := map[string]interface{}{}
+		if req.Name != nil && *req.Name != "" {
+			updates["name"] = *req.Name
+		}
+		if req.Avatar != nil {
+			updates["avatar"] = *req.Avatar
+		}
+		if len(updates) > 0 {
+			database.DB.Model(&g).Updates(updates)
+			database.DB.First(&g, "id = ?", groupID)
+			// Notify all members of the update
+			chatHub.broadcastGroupEvent(groupID, "group_info_updated", map[string]interface{}{
+				"groupId": groupID,
+				"name":    g.Name,
+				"avatar":  g.Avatar,
+			})
+		}
+		pkg.Success(c, buildGroupItem(g))
+	}
+}
+
+// ServiceCreateGroup handles POST /api/service/groups
+// Allows a service staff to create a new group directly from the PC client.
+func ServiceCreateGroup() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		staffID := c.GetString("serviceUserId")
+		var req struct {
+			Name   string `json:"name" binding:"required"`
+			Avatar string `json:"avatar"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			pkg.Fail(c, 400, "name is required")
+			return
+		}
+		g := model.Group{
+			ID:      generateGroupID(),
+			Name:    req.Name,
+			Avatar:  req.Avatar,
+			OwnerID: staffID,
+		}
+		if err := database.DB.Create(&g).Error; err != nil {
+			pkg.Fail(c, 500, err.Error())
+			return
+		}
+		// Auto-add owner as member
+		database.DB.Create(&model.GroupMember{
+			GroupID:  g.ID,
+			UserID:   staffID,
+			Role:     "owner",
+			JoinedAt: time.Now(),
+		})
+		pkg.Success(c, buildGroupItem(g))
+	}
+}
+
 // ServiceListGroups handles GET /api/service/groups
 func ServiceListGroups() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -139,7 +256,7 @@ func ServiceListGroups() gin.HandlerFunc {
 		}
 
 		var groups []model.Group
-		database.DB.Where("id IN ?", groupIDs).Order("created_at desc").Find(&groups)
+		database.DB.Where("id IN ? AND dissolved = ?", groupIDs, false).Order("created_at desc").Find(&groups)
 
 		// For each group, include member list with nicknames
 		type memberInfo struct {
@@ -185,6 +302,56 @@ func ServiceListGroups() gin.HandlerFunc {
 	}
 }
 
+// ServiceGetGroupMembers handles GET /api/service/groups/:id/members
+// Returns the full member list for a specific group.
+func ServiceGetGroupMembers() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		staffID := c.GetString("serviceUserId")
+		if staffID == "" {
+			pkg.Fail(c, 401, "未登录")
+			return
+		}
+		groupID := c.Param("id")
+
+		// Verify this staff is a member of the group
+		var selfMember model.GroupMember
+		if err := database.DB.Where("group_id = ? AND user_id = ?", groupID, staffID).First(&selfMember).Error; err != nil {
+			pkg.Fail(c, 403, "无权查看此群")
+			return
+		}
+
+		var gms []model.GroupMember
+		database.DB.Where("group_id = ?", groupID).Find(&gms)
+
+		type memberInfo struct {
+			UserID    string `json:"userId"`
+			Nickname  string `json:"nickname"`
+			AvatarUrl string `json:"avatarUrl"`
+			Role      string `json:"role"`
+		}
+		mlist := make([]memberInfo, 0, len(gms))
+		for _, gm := range gms {
+			mi := memberInfo{UserID: gm.UserID, Role: gm.Role}
+			var u model.User
+			if err := database.DB.First(&u, "id = ?", gm.UserID).Error; err == nil {
+				mi.Nickname = u.GroupNickname
+				if mi.Nickname == "" {
+					mi.Nickname = u.Nickname
+				}
+				mi.AvatarUrl = u.Avatar
+			} else {
+				var s model.ServiceStaff
+				if err2 := database.DB.First(&s, "user_id = ?", gm.UserID).Error; err2 == nil {
+					mi.Nickname = s.Nickname
+					mi.AvatarUrl = s.Avatar
+				}
+			}
+			mlist = append(mlist, mi)
+		}
+		pkg.Success(c, gin.H{"groupId": groupID, "members": mlist})
+	}
+}
+
 // ServiceInviteToGroup handles POST /api/service/groups/:id/members
 func ServiceInviteToGroup(chatHub *ChatHub) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -224,12 +391,16 @@ func ServiceInviteToGroup(chatHub *ChatHub) gin.HandlerFunc {
 			return
 		}
 
-		database.DB.Create(&model.GroupMember{
+		newMember := model.GroupMember{
 			GroupID:  groupID,
 			UserID:   req.UserID,
 			Role:     "member",
 			JoinedAt: time.Now(),
-		})
+		}
+		if err := database.DB.Create(&newMember).Error; err != nil {
+			pkg.Fail(c, 500, "failed to add member: "+err.Error())
+			return
+		}
 
 		// Notify new member and all online group members
 		chatHub.broadcastGroupEvent(groupID, "group_member_added", map[string]interface{}{
@@ -301,10 +472,18 @@ func ServiceKickFromGroup(chatHub *ChatHub) gin.HandlerFunc {
 			return
 		}
 
-		chatHub.broadcastGroupEvent(groupID, "group_member_removed", map[string]interface{}{
+		removedPayload := map[string]interface{}{
 			"groupId": groupID,
 			"userId":  targetUserID,
+		}
+		// Notify the kicked user directly (broadcastGroupEvent queries DB after delete,
+		// so the kicked user would be missing from the member list).
+		chatHub.sendToUser(targetUserID, map[string]interface{}{
+			"type": "group_member_removed",
+			"data": removedPayload,
 		})
+		// Notify remaining members.
+		chatHub.broadcastGroupEvent(groupID, "group_member_removed", removedPayload)
 
 		pkg.Success(c, buildGroupItem(g))
 	}

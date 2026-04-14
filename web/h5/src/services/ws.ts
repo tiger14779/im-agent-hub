@@ -47,6 +47,7 @@ interface ServerMessage {
   status: number
   isGroup?: boolean
   senderName?: string
+  senderAvatar?: string
 }
 
 type Envelope = { type: string; data: unknown }
@@ -74,6 +75,8 @@ class ChatWsService {
     timer: ReturnType<typeof setTimeout> | null
     retries: number
   }>()
+  /** ACK watchdog timers for group messages (no retry, just timeout-fail) */
+  private pendingGroupTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private static readonly ACK_TIMEOUT = 8000 // 8s per attempt
   private static readonly MAX_RETRIES = 2     // retry up to 2 times on reconnect
 
@@ -85,9 +88,10 @@ class ChatWsService {
   onDisconnected: () => void = () => {}
   onReconnected: () => void = () => {} // fires only on reconnect (not first connect)
   onMessageDeleted: (serverMsgId: string) => void = () => {} // message deleted by peer
-  onGroupMemberAdded: (groupId: string, userId: string, nickname: string) => void = () => {}
+  onGroupMemberAdded: (groupId: string, groupName: string, userId: string, nickname: string) => void = () => {}
   onGroupMemberRemoved: (groupId: string, userId: string) => void = () => {}
   onGroupDissolved: (groupId: string) => void = () => {}
+  onNewGroupMessage: (msg: Message & { groupId: string; groupName: string }) => void = () => {}
 
   /** Build the WebSocket URL based on current page origin */
   private buildWsUrl(): string {
@@ -194,8 +198,8 @@ class ChatWsService {
         break
       }
       case 'group_member_added': {
-        const d = env.data as { groupId: string; userId: string; nickname: string }
-        this.onGroupMemberAdded(d.groupId, d.userId, d.nickname)
+        const d = env.data as { groupId: string; groupName?: string; userId: string; nickname: string }
+        this.onGroupMemberAdded(d.groupId, d.groupName ?? '', d.userId, d.nickname)
         break
       }
       case 'group_member_removed': {
@@ -206,6 +210,16 @@ class ChatWsService {
       case 'group_dissolved': {
         const d = env.data as { groupId: string }
         this.onGroupDissolved(d.groupId)
+        break
+      }
+      case 'new_group_message': {
+        const raw = env.data as ServerMessage & { groupId: string; groupName: string }
+        const msg = this.toMessage(raw) as Message & { groupId: string; groupName: string }
+        msg.groupId = raw.groupId
+        msg.groupName = raw.groupName
+        msg.isGroup = true
+        msg.senderName = raw.senderName
+        this.onNewGroupMessage(msg)
         break
       }
       default:
@@ -228,7 +242,8 @@ class ChatWsService {
       sendTime: raw.sendTime,
       status: raw.status || 2,
       isGroup: raw.isGroup,
-      senderName: raw.senderName
+      senderName: raw.senderName,
+      senderAvatar: raw.senderAvatar
     }
 
     // Parse content JSON into typed fields
@@ -303,6 +318,12 @@ class ChatWsService {
     if (entry) {
       if (entry.timer) clearTimeout(entry.timer)
       this.pendingSends.delete(clientMsgId)
+    }
+    // Also clear group message watchdog timer if present
+    const groupTimer = this.pendingGroupTimers.get(clientMsgId)
+    if (groupTimer) {
+      clearTimeout(groupTimer)
+      this.pendingGroupTimers.delete(clientMsgId)
     }
   }
 
@@ -386,6 +407,30 @@ class ChatWsService {
       content: JSON.stringify({ url, name: file.name, size: file.size, type: file.type }),
       clientMsgId
     })
+    return clientMsgId
+  }
+
+  sendGroupMessage(groupId: string, text: string): string {
+    const clientMsgId = uuid()
+    const sent = this.send('send_group_message', {
+      groupId,
+      contentType: 101,
+      content: JSON.stringify({ text }),
+      clientMsgId
+    })
+    if (!sent) {
+      // WS not open — fail immediately so the UI doesn't stay stuck in "sending"
+      setTimeout(() => this.onAck({ clientMsgId, status: 3, error: '连接已断开，请稍后重试' }), 0)
+    } else {
+      // Start an ACK watchdog: if no response arrives within timeout, mark as failed
+      const timer = setTimeout(() => {
+        if (this.pendingGroupTimers.has(clientMsgId)) {
+          this.pendingGroupTimers.delete(clientMsgId)
+          this.onAck({ clientMsgId, status: 3, error: '发送超时' })
+        }
+      }, ChatWsService.ACK_TIMEOUT)
+      this.pendingGroupTimers.set(clientMsgId, timer)
+    }
     return clientMsgId
   }
 

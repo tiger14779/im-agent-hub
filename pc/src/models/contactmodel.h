@@ -21,6 +21,7 @@ struct Contact {
     QString onlineStatus; // 在线状态: "online", "background", "offline"
     bool isGroup = false; // 是否群聊
     int memberCount = 0;  // 群成员数（isGroup=true 时有效）
+    QString groupNickname; // 群内昵称（用于编辑对话框回显）
 };
 
 /**
@@ -47,7 +48,8 @@ public:
         UnreadCountRole,                 // 未读数
         OnlineStatusRole,                // 在线状态
         IsGroupRole,                     // 是否群聊
-        MemberCountRole                  // 群成员数
+        MemberCountRole,                 // 群成员数
+        GroupNicknameRole                // 群内昵称
     };
 
     explicit ContactModel(QObject *parent = nullptr);
@@ -71,6 +73,8 @@ public:
     // 添加或更新联系人（已存在则更新昵称和头像）
     Q_INVOKABLE void addOrUpdate(const QString &userId, const QString &nickname,
                                   const QString &avatarUrl = {});
+    // 添加或更新群组条目（必定标记 isGroup=true）
+    Q_INVOKABLE void addOrUpdateAsGroup(const QString &groupId, const QString &name, int memberCount = 0, const QString &avatarUrl = {});
     // 更新联系人昵称
     Q_INVOKABLE void updateNickname(const QString &userId, const QString &nickname);
     // 更新联系人头像
@@ -86,6 +90,10 @@ public:
 
     // 获取指定用户的昵称，找不到则返回 userId
     Q_INVOKABLE QString getNickname(const QString &userId) const;
+    // 获取指定用户的群内昵称
+    Q_INVOKABLE QString getGroupNickname(const QString &userId) const;
+    // 更新指定用户的群内昵称
+    Q_INVOKABLE void updateGroupNickname(const QString &userId, const QString &groupNickname);
     // 获取指定用户的头像URL
     Q_INVOKABLE QString getAvatar(const QString &userId) const;
     // 获取指定用户的在线状态

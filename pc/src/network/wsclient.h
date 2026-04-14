@@ -77,6 +77,8 @@ signals:
     void groupMemberRemoved(const QString &groupId, const QString &userId);
     // 群解散 (groupId)
     void groupDissolved(const QString &groupId);
+    // 群信息更新 (groupId, name, avatar)
+    void groupInfoUpdated(const QString &groupId, const QString &name, const QString &avatar);
 
 private slots:
     void onConnected();                                 // WS 连接成功

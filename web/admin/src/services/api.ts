@@ -101,8 +101,11 @@ export const uploadFile = (file: File) => {
 export const getGroups = () =>
   request.get('/groups')
 
-export const createGroup = (data: { name: string; ownerId: string }) =>
+export const createGroup = (data: { name: string; ownerId: string; avatar?: string }) =>
   request.post('/groups', data)
+
+export const updateGroup = (id: string, data: { name?: string; avatar?: string }) =>
+  request.put(`/groups/${id}`, data)
 
 export const deleteGroup = (id: string) =>
   request.delete(`/groups/${id}`)

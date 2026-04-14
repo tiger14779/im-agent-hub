@@ -249,7 +249,7 @@ func (s *MessageService) CleanupOldMessages(retentionDays int) (int64, error) {
 // SaveGroupMessage persists a group message.
 // ConversationID = "group_" + groupID; FOR UPDATE lock ensures monotone seq.
 // Returns the saved message, isDup bool, and error.
-func (s *MessageService) SaveGroupMessage(sendID, groupID string, contentType int, content, clientMsgID, senderName string) (*model.Message, bool, error) {
+func (s *MessageService) SaveGroupMessage(sendID, groupID string, contentType int, content, clientMsgID, senderName, senderAvatar string) (*model.Message, bool, error) {
 	// Dedup
 	if clientMsgID != "" {
 		var existing model.Message
@@ -275,6 +275,7 @@ func (s *MessageService) SaveGroupMessage(sendID, groupID string, contentType in
 		Status:         2,
 		IsGroup:        true,
 		SenderName:     senderName,
+		SenderAvatar:   senderAvatar,
 	}
 
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
