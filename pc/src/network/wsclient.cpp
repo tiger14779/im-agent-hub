@@ -179,10 +179,10 @@ void WsClient::checkAckTimeouts()
     }
 }
 
-void WsClient::loadHistory(const QString &peerUserId, qint64 beforeSeq, int limit)
+void WsClient::loadHistory(const QString &peerUserId, qint64 beforeSeq, int limit, qint64 afterSeq)
 {
     qDebug() << "[WsClient] loadHistory connected=" << m_connected << "peerUserId=" << peerUserId
-             << "beforeSeq=" << beforeSeq << "limit=" << limit;
+             << "beforeSeq=" << beforeSeq << "afterSeq=" << afterSeq << "limit=" << limit;
 
     if (!m_connected) {
         qDebug() << "[WsClient] loadHistory skipped: not connected, saving pending request";
@@ -196,8 +196,10 @@ void WsClient::loadHistory(const QString &peerUserId, qint64 beforeSeq, int limi
 
     QJsonObject data;
     data["peerUserId"] = peerUserId;
-    if (beforeSeq > 0)
-        data["beforeSeq"] = beforeSeq;
+    if (afterSeq > 0)
+        data["afterSeq"] = afterSeq;  // 增量模式
+    else if (beforeSeq > 0)
+        data["beforeSeq"] = beforeSeq; // 向上翻页模式
     data["limit"] = limit;
 
     QJsonObject envelope;

@@ -3,7 +3,8 @@
 #include <QUuid>
 #include <QJsonDocument>
 #include <QJsonArray>
-#include <QSet>
+#include <QFile>
+#include <QUrl>
 
 ChatModel::ChatModel(QObject *parent)
     : QAbstractListModel(parent)
@@ -70,7 +71,7 @@ void ChatModel::appendMessage(const QJsonObject &msg)
 {
     ChatMessage m = fromJson(msg);
     // Dedup: if clientMsgID already exists, update in place (server data refreshes stale cache)
-    if (!m.clientMsgID.isEmpty()) {
+    if (!m.clientMsgID.isEmpty() && m_idSet.contains(m.clientMsgID)) {
         for (int i = 0; i < m_messages.size(); ++i) {
             if (m_messages[i].clientMsgID == m.clientMsgID) {
                 m_messages[i] = m;
@@ -80,8 +81,27 @@ void ChatModel::appendMessage(const QJsonObject &msg)
             }
         }
     }
-    beginInsertRows(QModelIndex(), m_messages.size(), m_messages.size());
-    m_messages.append(m);
+
+    // 按 sendTime 升序插入：若消息时间早于当前最新消息，搜索正确位置插入而不是盲目追加
+    // （防止重连同步或离线消息延迟到达时旧消息出现在底部）
+    int insertPos = m_messages.size(); // default: append to end
+    if (m.sendTime > 0 && !m_messages.isEmpty() && m.sendTime < m_messages.last().sendTime) {
+        // Binary search for sorted insertion point
+        int lo = 0, hi = m_messages.size() - 1;
+        while (lo <= hi) {
+            int mid = (lo + hi) / 2;
+            if (m_messages[mid].sendTime <= m.sendTime)
+                lo = mid + 1;
+            else
+                hi = mid - 1;
+        }
+        insertPos = lo;
+    }
+
+    beginInsertRows(QModelIndex(), insertPos, insertPos);
+    if (!m.clientMsgID.isEmpty())
+        m_idSet.insert(m.clientMsgID);
+    m_messages.insert(insertPos, m);
     endInsertRows();
     emit countChanged();
 }
@@ -89,20 +109,19 @@ void ChatModel::appendMessage(const QJsonObject &msg)
 void ChatModel::prependMessages(const QJsonArray &msgs)
 {
     if (msgs.isEmpty()) return;
-    // Build list, filtering duplicates
+    // Build list, filtering duplicates using class-level m_idSet (O(1) per lookup)
     QVector<ChatMessage> newMsgs;
-    QSet<QString> existing;
-    for (const auto &m : m_messages)
-        existing.insert(m.clientMsgID);
     for (const auto &val : msgs) {
         ChatMessage cm = fromJson(val.toObject());
-        if (!existing.contains(cm.clientMsgID))
+        if (!m_idSet.contains(cm.clientMsgID))
             newMsgs.append(cm);
     }
     if (newMsgs.isEmpty()) return;
     beginInsertRows(QModelIndex(), 0, newMsgs.size() - 1);
-    for (int i = newMsgs.size() - 1; i >= 0; --i)
+    for (int i = newMsgs.size() - 1; i >= 0; --i) {
+        m_idSet.insert(newMsgs[i].clientMsgID);
         m_messages.prepend(newMsgs[i]);
+    }
     endInsertRows();
     emit countChanged();
 }
@@ -124,6 +143,7 @@ QString ChatModel::addPendingMessage(const QString &recvId, int contentType,
     msg.status = 1; // 发送中
 
     beginInsertRows(QModelIndex(), m_messages.size(), m_messages.size());
+    m_idSet.insert(msg.clientMsgID);
     m_messages.append(msg);
     endInsertRows();
     emit countChanged();
@@ -139,11 +159,7 @@ bool ChatModel::hasMessage(const QString &clientMsgID) const
 {
     if (clientMsgID.isEmpty())
         return false;
-    for (const auto &m : m_messages) {
-        if (m.clientMsgID == clientMsgID)
-            return true;
-    }
-    return false;
+    return m_idSet.contains(clientMsgID);
 }
 
 void ChatModel::updateStatus(const QString &clientMsgID, int status, const QString &serverMsgID)
@@ -164,6 +180,7 @@ void ChatModel::clear()
 {
     beginResetModel();
     m_messages.clear();
+    m_idSet.clear();
     endResetModel();
     emit countChanged();
 }
@@ -197,8 +214,10 @@ void ChatModel::replaceAll(const QJsonArray &msgs)
             // Append any extra messages from server (new msgs arrived during round-trip)
             if (newSize > oldSize) {
                 beginInsertRows(QModelIndex(), oldSize, newSize - 1);
-                for (int i = oldSize; i < newSize; ++i)
+                for (int i = oldSize; i < newSize; ++i) {
+                    m_idSet.insert(newList[i].clientMsgID);
                     m_messages.append(newList[i]);
+                }
                 endInsertRows();
                 emit countChanged();
             }
@@ -210,6 +229,8 @@ void ChatModel::replaceAll(const QJsonArray &msgs)
     if (oldSize == 0 && newSize > 0) {
         beginInsertRows(QModelIndex(), 0, newSize - 1);
         m_messages = std::move(newList);
+        for (const auto &m : m_messages)
+            m_idSet.insert(m.clientMsgID);
         endInsertRows();
         emit countChanged();
         return;
@@ -218,12 +239,15 @@ void ChatModel::replaceAll(const QJsonArray &msgs)
     // Slow path: structure differs → clear then insert (same visual as original clear+prependMessages)
     beginResetModel();
     m_messages.clear();
+    m_idSet.clear();
     endResetModel();
     emit countChanged();
 
     if (newSize > 0) {
         beginInsertRows(QModelIndex(), 0, newSize - 1);
         m_messages = std::move(newList);
+        for (const auto &m : m_messages)
+            m_idSet.insert(m.clientMsgID);
         endInsertRows();
         emit countChanged();
     }
@@ -240,6 +264,10 @@ ChatMessage ChatModel::fromJson(const QJsonObject &obj) const
     m.sendTime = static_cast<qint64>(obj["sendTime"].toDouble());
     m.status = obj["status"].toInt(2);
 
+    // 检查本地已缓存的媒体文件（优先用本地路径，避免重复下载 + 图片闪烁）
+    QString localPath = obj["localPath"].toString();
+    bool useLocal = !localPath.isEmpty() && QFile::exists(localPath);
+
     // 根据消息类型解析对应的内容字段
     if (m.contentType == 101) {
         // 文本消息：优先从 textElem.text 取，其次 textElem.content，最后 fallback 到 content
@@ -250,16 +278,20 @@ ChatMessage ChatModel::fromJson(const QJsonObject &obj) const
         if (m.textContent.isEmpty())
             m.textContent = obj["content"].toString();
     } else if (m.contentType == 102) {
-        // 图片消息 —— 同时支持 OpenIM 格式和简化 {url} 格式
-        QJsonObject pic = obj["pictureElem"].toObject();
-        QJsonObject src = pic["sourcePicture"].toObject();
-        m.imageUrl = src["url"].toString();
-        if (m.imageUrl.isEmpty())
-            m.imageUrl = pic["bigPicture"].toObject()["url"].toString();
-        if (m.imageUrl.isEmpty())
-            m.imageUrl = pic["url"].toString();
+        // 图片消息 —— 有本地缓存则直接用 file:// 路径，否则从服务器 URL
+        if (useLocal) {
+            m.imageUrl = QUrl::fromLocalFile(localPath).toString();
+        } else {
+            QJsonObject pic = obj["pictureElem"].toObject();
+            QJsonObject src = pic["sourcePicture"].toObject();
+            m.imageUrl = src["url"].toString();
+            if (m.imageUrl.isEmpty())
+                m.imageUrl = pic["bigPicture"].toObject()["url"].toString();
+            if (m.imageUrl.isEmpty())
+                m.imageUrl = pic["url"].toString();
+        }
     } else if (m.contentType == 105) {
-        // 文件消息 —— 同时支持 OpenIM 格式和简化 {url,name,size} 格式
+        // 文件消息 —— 同上
         QJsonObject fileElem = obj["fileElem"].toObject();
         m.fileName = fileElem["fileName"].toString();
         if (m.fileName.isEmpty())
@@ -267,15 +299,23 @@ ChatMessage ChatModel::fromJson(const QJsonObject &obj) const
         m.fileSize = static_cast<qint64>(fileElem["fileSize"].toDouble());
         if (m.fileSize == 0)
             m.fileSize = static_cast<qint64>(fileElem["size"].toDouble());
-        m.imageUrl = fileElem["sourceUrl"].toString();
-        if (m.imageUrl.isEmpty())
-            m.imageUrl = fileElem["url"].toString();
+        if (useLocal) {
+            m.imageUrl = QUrl::fromLocalFile(localPath).toString();
+        } else {
+            m.imageUrl = fileElem["sourceUrl"].toString();
+            if (m.imageUrl.isEmpty())
+                m.imageUrl = fileElem["url"].toString();
+        }
     } else if (m.contentType == 103) {
-        // 语音消息 —— 支持 {url, duration} 格式
+        // 语音消息 —— 同上
         QJsonObject voiceElem = obj["voiceElem"].toObject();
-        m.imageUrl = voiceElem["sourceUrl"].toString();
-        if (m.imageUrl.isEmpty())
-            m.imageUrl = voiceElem["url"].toString();
+        if (useLocal) {
+            m.imageUrl = QUrl::fromLocalFile(localPath).toString();
+        } else {
+            m.imageUrl = voiceElem["sourceUrl"].toString();
+            if (m.imageUrl.isEmpty())
+                m.imageUrl = voiceElem["url"].toString();
+        }
         m.voiceDuration = voiceElem["duration"].toInt();
     }
 
@@ -292,10 +332,24 @@ void ChatModel::removeMessageByServerMsgID(const QString &serverMsgID)
     if (serverMsgID.isEmpty()) return;
     for (int i = 0; i < m_messages.size(); ++i) {
         if (m_messages[i].serverMsgID == serverMsgID) {
+            m_idSet.remove(m_messages[i].clientMsgID);
             beginRemoveRows(QModelIndex(), i, i);
             m_messages.removeAt(i);
             endRemoveRows();
             emit countChanged();
+            return;
+        }
+    }
+}
+
+void ChatModel::updateImageUrl(const QString &clientMsgID, const QString &newUrl)
+{
+    if (clientMsgID.isEmpty()) return;
+    for (int i = 0; i < m_messages.size(); ++i) {
+        if (m_messages[i].clientMsgID == clientMsgID) {
+            m_messages[i].imageUrl = newUrl;
+            QModelIndex idx = index(i);
+            emit dataChanged(idx, idx, { ImageUrlRole });
             return;
         }
     }

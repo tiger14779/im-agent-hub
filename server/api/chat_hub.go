@@ -397,6 +397,7 @@ func (h *ChatHub) handleLoadHistory(cc *ChatConn, data json.RawMessage) {
 	var req struct {
 		PeerUserID string `json:"peerUserId"`
 		BeforeSeq  int64  `json:"beforeSeq"` // 0 = latest
+		AfterSeq   int64  `json:"afterSeq"`  // > 0 = incremental: only return seq > afterSeq
 		Limit      int    `json:"limit"`     // default 50
 	}
 	if err := json.Unmarshal(data, &req); err != nil {
@@ -410,7 +411,22 @@ func (h *ChatHub) handleLoadHistory(cc *ChatConn, data json.RawMessage) {
 	} else {
 		convID = service.MakeConversationID(cc.userID, req.PeerUserID)
 	}
-	msgs, err := h.msgSvc.GetHistory(convID, req.BeforeSeq, req.Limit)
+
+	var msgs []model.Message
+	var err error
+	var hasMore bool
+
+	if req.AfterSeq > 0 {
+		// 增量模式：只拉取 afterSeq 之后的新消息（切换已有缓存的会话时使用）
+		msgs, err = h.msgSvc.GetNewMessages(convID, req.AfterSeq)
+		hasMore = false // 增量模式不支持向上翻页
+	} else {
+		if req.Limit <= 0 {
+			req.Limit = 50
+		}
+		msgs, err = h.msgSvc.GetHistory(convID, req.BeforeSeq, req.Limit)
+		hasMore = len(msgs) >= req.Limit
+	}
 
 	resp := map[string]interface{}{
 		"type": "history",
@@ -418,7 +434,8 @@ func (h *ChatHub) handleLoadHistory(cc *ChatConn, data json.RawMessage) {
 			"peerUserId":     req.PeerUserID,
 			"conversationId": convID,
 			"messages":       msgs,
-			"hasMore":        len(msgs) >= req.Limit || (req.Limit == 0 && len(msgs) >= 50),
+			"hasMore":        hasMore,
+			"afterSeq":       req.AfterSeq, // 透传，客户端据此判断是增量还是全量
 		},
 	}
 	if err != nil {
@@ -427,6 +444,7 @@ func (h *ChatHub) handleLoadHistory(cc *ChatConn, data json.RawMessage) {
 			"peerUserId": req.PeerUserID,
 			"messages":   []interface{}{},
 			"hasMore":    false,
+			"afterSeq":   req.AfterSeq,
 		}
 	}
 

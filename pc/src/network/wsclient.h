@@ -43,7 +43,8 @@ public:
                                        const QString &content, const QString &clientMsgId);
 
     // 加载与某个用户的历史聊天记录（支持分页）
-    Q_INVOKABLE void loadHistory(const QString &peerUserId, qint64 beforeSeq = 0, int limit = 50);
+    // afterSeq > 0 时为增量拉取（只返回 seq > afterSeq 的新消息）
+    Q_INVOKABLE void loadHistory(const QString &peerUserId, qint64 beforeSeq = 0, int limit = 50, qint64 afterSeq = 0);
 
     // 删除消息（通过 serverMsgId）
     Q_INVOKABLE void deleteMessage(const QString &serverMsgId);

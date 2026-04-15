@@ -271,3 +271,27 @@ void MessageCache::clearChat(const QString &peerUserId)
     q.bindValue(":peer", peerUserId);
     q.exec();
 }
+
+void MessageCache::setLocalPath(const QString &clientMsgID, const QString &localPath)
+{
+    if (!m_db.isOpen() || clientMsgID.isEmpty()) return;
+
+    // 读取现有 rawJson
+    QSqlQuery sel(m_db);
+    sel.prepare("SELECT rawJson FROM messages WHERE clientMsgID = :cid");
+    sel.bindValue(":cid", clientMsgID);
+    if (!sel.exec() || !sel.next()) return;
+
+    // 嵌入 localPath 字段并写回
+    QJsonDocument doc = QJsonDocument::fromJson(sel.value(0).toString().toUtf8());
+    QJsonObject obj = doc.object();
+    obj["localPath"] = localPath;
+    QString newRaw = QString::fromUtf8(QJsonDocument(obj).toJson(QJsonDocument::Compact));
+
+    QSqlQuery upd(m_db);
+    upd.prepare("UPDATE messages SET rawJson = :raw WHERE clientMsgID = :cid");
+    upd.bindValue(":raw", newRaw);
+    upd.bindValue(":cid", clientMsgID);
+    if (!upd.exec())
+        qWarning() << "[MessageCache] setLocalPath 失败:" << upd.lastError().text();
+}

@@ -51,6 +51,9 @@ public:
     /// 清空某个会话的所有缓存消息
     Q_INVOKABLE void clearChat(const QString &peerUserId);
 
+    /// 设置消息关联的本地媒体文件路径（后台下载完成后调用，更新 rawJson 持久化）
+    Q_INVOKABLE void setLocalPath(const QString &clientMsgID, const QString &localPath);
+
 private:
     void createTable();
     QString peerIdFromMsg(const QJsonObject &msg, const QString &selfId) const;

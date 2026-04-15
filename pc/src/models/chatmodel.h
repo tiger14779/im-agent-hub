@@ -5,6 +5,8 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QDateTime>
+#include <QSet>
+#include <QFile>
 #include <QtQml/qqmlregistration.h>
 
 /**
@@ -92,6 +94,9 @@ public:
     // 检查是否已存在指定 clientMsgID 的消息（用于去重）
     Q_INVOKABLE bool hasMessage(const QString &clientMsgID) const;
 
+    // 就地更新消息的 imageUrl（媒体文件下载完成后调用，无需重建整个列表）
+    Q_INVOKABLE void updateImageUrl(const QString &clientMsgID, const QString &newUrl);
+
     // 清空所有消息（切换会话时调用）
     Q_INVOKABLE void clear();
 
@@ -109,6 +114,7 @@ private:
     ChatMessage fromJson(const QJsonObject &obj) const;
 
     QVector<ChatMessage> m_messages;  // 消息列表
+    QSet<QString>  m_idSet;           // clientMsgID 集合，O(1) 去重查询
     QString m_selfId;                 // 当前用户ID（用于判断 isSelf）
 };
 

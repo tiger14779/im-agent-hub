@@ -9,6 +9,11 @@ ListView {
     spacing: 4
     verticalLayoutDirection: ListView.TopToBottom
 
+    // 初始化期间隐藏列表（等待滚到底后再显示），避免用户看到从顶跳到底的闪烁
+    property bool _initializing: false
+    opacity: _initializing ? 0 : 1
+    // 无淡入动画，直接显示
+
     property string selfId: ""          // 当前用户ID，用于判断消息方向
     property string peerAvatarUrl: ""   // 对方头像URL
     property string selfAvatarUrl: ""   // 自己的头像URL
@@ -33,24 +38,31 @@ ListView {
     property bool _needScrollToEnd: false
 
     // 补偿定时器：delegate 异步渲染后多次确认滚到底部
-    // 最多重试6次（共 ~500ms），到底后立即停止
+    // 最多重试6次（共 ~100ms），到底后立即停止
     Timer {
         id: _scrollFixTimer
-        interval: 80
+        interval: 16   // 一帧（16ms，原 80ms 导致首次显示时有明显感知延迟）
         repeat: true
         property int _retries: 0
+
+        // 停止并解除初始化隐藏（触发淡入）
+        function stopAndReveal() {
+            stop()
+            msgList._initializing = false
+        }
+
         onTriggered: {
             _retries++
             if (_retries > 6 || _userScrolledUp || suppressAutoScroll) {
-                stop()
+                stopAndReveal()
                 return
             }
             msgList.positionViewAtEnd()
             // 已到底则停止
             if (contentHeight > 0 && contentHeight <= height + 10) {
-                stop()
+                stopAndReveal()
             } else if (contentHeight > height && (contentY + height + 5) >= contentHeight) {
-                stop()
+                stopAndReveal()
             }
         }
         function begin() {
@@ -68,6 +80,7 @@ ListView {
             _prevContentHeight = 0
             _userScrolledUp = false
             _needScrollToEnd = true
+            _initializing = true  // 隐藏列表，等待重新滚到底后淡入，避免从顶跳到底的闪烁
         } else if (_needScrollToEnd) {
             // clear 后紧接而来的 append/prepend —— 初次加载，滚到底部
             _needScrollToEnd = false
@@ -86,6 +99,8 @@ ListView {
         } else {
             // 新消息追加到尾部：除非用户明确上滚过或合并同步中，否则自动滚到底部
             if (!_userScrolledUp && !suppressAutoScroll) {
+                // 首次从空 model 填充（如首次打开 app）：同样需要隐藏后淡入
+                if (count === added) _initializing = true
                 Qt.callLater(function() {
                     msgList.positionViewAtEnd()
                     _scrollFixTimer.begin()
