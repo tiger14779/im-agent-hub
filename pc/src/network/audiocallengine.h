@@ -27,7 +27,11 @@ class AudioRingBuffer : public QIODevice
 public:
     explicit AudioRingBuffer(QObject *parent = nullptr);
     void push(const QByteArray &data);  // 从网络线程写入
-    bool isReady() const { return true; }
+
+    // 必须声明为顺序设备，否则 Qt 内部将尝试 seek 导致 readData 不被调用
+    bool isSequential() const override { return true; }
+    // 返回缓冲区字节数；空时返回一个大数保证 sink 持续拉取静音
+    qint64 bytesAvailable() const override;
 
 protected:
     qint64 readData(char *data, qint64 maxSize) override;

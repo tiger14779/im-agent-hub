@@ -26,6 +26,15 @@ void AudioRingBuffer::push(const QByteArray &data)
     m_buf.append(data);
 }
 
+qint64 AudioRingBuffer::bytesAvailable() const
+{
+    QMutexLocker lock(&m_mutex);
+    // 返回缓冲区内字节数 + QIODevice 基类的返回值
+    // 即使缓冲为空也返回一个正数，让 sink 持续拉取（readData 会填静音）
+    return qMax(static_cast<qint64>(m_buf.size()), static_cast<qint64>(4096))
+           + QIODevice::bytesAvailable();
+}
+
 qint64 AudioRingBuffer::readData(char *data, qint64 maxSize)
 {
     QMutexLocker lock(&m_mutex);
