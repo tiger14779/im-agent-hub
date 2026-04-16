@@ -52,13 +52,6 @@
               </span>
               <span>{{ muted ? '取消静音' : '静音' }}</span>
             </button>
-            <button class="call-btn speaker" :class="{ active: speakerOn }" @click="toggleSpeaker">
-              <span class="call-icon">
-                <svg v-if="speakerOn" class="call-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
-                <svg v-else class="call-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
-              </span>
-              <span>{{ speakerOn ? '免提' : '听筒' }}</span>
-            </button>
             <button class="call-btn hangup" @click="onHangup">
               <span class="call-icon"><svg class="call-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9"/><line x1="23" y1="1" x2="1" y2="23"/></svg></span>
               <span>挂断</span>
@@ -119,9 +112,6 @@ let playbackCursor = 0 // scheduled playback cursor - keeps frames contiguous, n
 let ringtoneCtx: AudioContext | null = null
 let ringtoneTimer: ReturnType<typeof setTimeout> | null = null
 let ringtoneRunning = false
-
-// 默认听筒模式（iOS 上 AudioContext 默认走听筒；开启免提后通过 <audio> 元素切换为扬声器）
-const speakerOn = ref(false)
 
 // ── 来电提示音（双振荡器 + 颤音，模拟真实电话铃声）─────────────────
 function ringBurst(ctx: AudioContext, t: number) {
@@ -240,21 +230,15 @@ async function connectAudioWs(wsBase: string, roomId: string, token: string) {
     scriptNode.connect(audioCtx.destination)
 
     console.log('[VoiceCall] pipeline ready, phase -> active')
-    // 建立播放增益节点 + 免提路由
+    // 建立播放增益节点 + 固定扬声器路由（通过 <audio> 元素载入媒体流，强制使用底部扬声器）
     playbackGain = audioCtx.createGain()
     playbackGain.gain.value = 3.0
     speakerDest = audioCtx.createMediaStreamDestination()
+    playbackGain.connect(speakerDest)
     speakerAudio = new Audio()
+    speakerAudio.srcObject = speakerDest.stream
     speakerAudio.volume = 1.0
-    // 默认听筒模式：直连 audioCtx.destination，不启动 <audio> 元素
-    // iOS：无 <audio> 元素播放时 AudioContext 走听筒；启动 speakerAudio 后切换为扬声器
-    if (speakerOn.value) {
-      playbackGain.connect(speakerDest)
-      speakerAudio.srcObject = speakerDest.stream
-      speakerAudio.play().catch(() => {})
-    } else {
-      playbackGain.connect(audioCtx.destination)
-    }
+    speakerAudio.play().catch(() => {})
     playbackCursor = 0
     phase.value = 'active'
     startDurationTimer()
@@ -402,24 +386,6 @@ function onHangup() {
   const peerId = callFromId.value || callToId.value
   chatWs.sendCallEnd(peerId)
   endCall()
-}
-// 免提切换
-function toggleSpeaker() {
-  speakerOn.value = !speakerOn.value
-  if (!audioCtx || !playbackGain || !speakerDest || !speakerAudio) return
-  if (speakerOn.value) {
-    // 扬声器模式：让 <audio> 元素接管播放 → iOS 切换音频会话为媒体模式 = 底部扬声器
-    try { playbackGain.disconnect(audioCtx.destination) } catch (_) {}
-    playbackGain.connect(speakerDest)
-    speakerAudio.srcObject = speakerDest.stream
-    speakerAudio.play().catch(() => {})
-  } else {
-    // 听筒模式：撤销 <audio> 元素 → iOS 音频会话回到通话/听筒模式
-    playbackGain.disconnect(speakerDest)
-    speakerAudio.pause()
-    speakerAudio.srcObject = null  // 释放 srcObject 才能让 iOS 真正切回听筒
-    playbackGain.connect(audioCtx.destination)
-  }
 }
 // ── 静音切换 ──────────────────────────────────────────────────────
 function toggleMute() {
