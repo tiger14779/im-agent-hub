@@ -576,6 +576,38 @@ Page {
 
                         Item { Layout.fillWidth: true }
 
+                        // 🔊 语音通话按钮（仅私聊时显示）
+                        Rectangle {
+                            width: 32; height: 32; radius: 4
+                            visible: !activeChatIsGroup && activeChatId.length > 0
+                            color: callBtn.containsMouse ? "#e0e0e0" : "transparent"
+
+                            Label {
+                                anchors.centerIn: parent
+                                text: "📞"
+                                font.pixelSize: 16
+                            }
+
+                            MouseArea {
+                                id: callBtn
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (voiceCallWindow.phase !== "idle") return
+                                    voiceCallWindow.peerId   = activeChatId
+                                    voiceCallWindow.peerName = activeChatName || activeChatId
+                                    voiceCallWindow.myId     = staffUserId
+                                    voiceCallWindow.myName   = staffNickname
+                                    voiceCallWindow.phase    = "outgoing"
+                                    // 向后端申请 LiveKit token
+                                    HttpClient.getLiveKitToken(activeChatId)
+                                }
+                            }
+                            ToolTip.visible: callBtn.containsMouse
+                            ToolTip.text: "语音通话"
+                        }
+
                         // 群组成员管理按钮（仅群聊显示）
                         Rectangle {
                             width: 32; height: 32; radius: 4
@@ -672,10 +704,132 @@ Page {
         }
     }
 
+    // ── 语音通话窗口（通话中悬浮 + 来电/去电弹窗）──────────────
+    VoiceCallWindow {
+        id: voiceCallWindow
+        anchors.fill: parent
+        z: 100
+
+        // 来电：客服点击接听 → 申请 token（传入已有 roomName）→ 进入通话
+        onCallAccepted: {
+            console.log("[LiveKit] 接听按钮: peerId=", voiceCallWindow.peerId,
+                        "roomName=", voiceCallWindow.roomName,
+                        "phase=", voiceCallWindow.phase)
+            HttpClient.getLiveKitToken(voiceCallWindow.peerId, voiceCallWindow.roomName)
+            // token 返回后由 liveKitTokenReady 处理
+            WsClient.sendCallAccept(voiceCallWindow.peerId, voiceCallWindow.roomName)
+        }
+
+        // 来电：客服拒绝
+        onCallRejected: {
+            WsClient.sendCallReject(voiceCallWindow.peerId)
+            voiceCallWindow.reset()
+        }
+
+        // 通话结束（己方挂断 或 HTML页面触发）
+        onCallEnded: {
+            WsClient.sendCallEnd(voiceCallWindow.peerId, voiceCallWindow.roomName)
+            voiceCallWindow.reset()
+        }
+    }
+
+    // LiveKit token 申请回调
+    Connections {
+        target: HttpClient
+
+        function onLiveKitTokenReady(token, roomName, wsUrl) {
+            console.log("[LiveKit] onLiveKitTokenReady phase=", voiceCallWindow.phase,
+                        "tokenLen=", token.length, "room=", roomName)
+            if (voiceCallWindow.phase === "outgoing") {
+                // 主叫：token 回来后保存自己的凭证，发出 invite，等待对方接听
+                voiceCallWindow.livekitToken = token
+                voiceCallWindow.livekitWsUrl = wsUrl
+                voiceCallWindow.roomName     = roomName
+                WsClient.sendCallInvite(
+                    voiceCallWindow.peerId,
+                    roomName,
+                    wsUrl,
+                    staffNickname
+                )
+            } else if (voiceCallWindow.phase === "incoming") {
+                // 被叫：接听后拿到 token，立即开始通话
+                voiceCallWindow.livekitToken = token
+                voiceCallWindow.livekitWsUrl = wsUrl
+                voiceCallWindow.startActiveCall()
+            } else {
+                console.log("[LiveKit] onLiveKitTokenReady 未匹配任何分支, phase=", voiceCallWindow.phase)
+            }
+        }
+
+        function onLiveKitTokenError(error) {
+            console.warn("[VoiceCall] token error:", error)
+            WsClient.sendCallReject(voiceCallWindow.peerId)
+            voiceCallWindow.reset()
+        }
+    }
+
+    // WsClient 通话信令回调
+    Connections {
+        target: WsClient
+
+        function onCallInviteReceived(fromId, fromName, roomName, livekitUrl) {
+            if (voiceCallWindow.phase !== "idle") {
+                // 已在通话中，自动拒绝
+                WsClient.sendCallReject(fromId)
+                return
+            }
+            voiceCallWindow.peerId       = fromId
+            voiceCallWindow.peerName     = fromName || fromId
+            voiceCallWindow.roomName     = roomName
+            voiceCallWindow.livekitWsUrl = livekitUrl
+            voiceCallWindow.myId         = staffUserId
+            voiceCallWindow.myName       = staffNickname
+            voiceCallWindow.phase        = "incoming"
+        }
+
+        function onCallAccepted(fromId, roomName) {
+            console.log("[LiveKit] WsClient.onCallAccepted fromId=", fromId,
+                        "peerId=", voiceCallWindow.peerId,
+                        "phase=", voiceCallWindow.phase,
+                        "tokenLen=", voiceCallWindow.livekitToken.length)
+            if (voiceCallWindow.phase === "outgoing" && voiceCallWindow.peerId === fromId) {
+                // 对方接听：主叫的 token 已在 onLiveKitTokenReady 里赋好，直接进入通话
+                if (voiceCallWindow.livekitToken !== "") {
+                    voiceCallWindow.startActiveCall()
+                } else {
+                    console.log("[LiveKit] call_accept 到达但 token 为空！等待 onLiveKitTokenReady")
+                }
+            } else {
+                console.log("[LiveKit] call_accept 条件不匹配: phase=", voiceCallWindow.phase,
+                            "peerId匹配=", voiceCallWindow.peerId === fromId)
+            }
+        }
+
+        function onCallRejected(fromId) {
+            if (voiceCallWindow.peerId === fromId) {
+                voiceCallWindow.statusMsg = "\u5bf9\u65b9\u62d2\u7edd\u63a5\u542c"
+                voiceCallWindow.autoCloseTimer.start()
+            }
+        }
+
+        function onCallBusy(fromId) {
+            if (voiceCallWindow.peerId === fromId) {
+                voiceCallWindow.statusMsg = "\u5bf9\u65b9\u5fd9\u7ebf\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5"
+                voiceCallWindow.autoCloseTimer.start()
+            }
+        }
+
+        function onCallEnded(fromId) {
+            if (voiceCallWindow.peerId === fromId) {
+                voiceCallWindow.reset()
+            }
+        }
+    }
+
     // ── 群组信息抽屉 ─────────────────────────────
     GroupInfoDrawer {
         id: groupInfoDrawer
-        height: chatRoot.height   // Drawer 在 Page 内需要显式绑定高度，否则默认 0
+        height: chatRoot.height
         // 将 Drawer 绑定在右侧聊天区域（Page 坐标）
         // Drawer 会从整个 Page 的右边缘推入
         onInviteMembersClicked: {

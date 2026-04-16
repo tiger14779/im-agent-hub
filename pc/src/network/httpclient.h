@@ -104,6 +104,11 @@ public:
     // 下载远程文件后启动系统拖放操作（拖到资源管理器可保存）
     Q_INVOKABLE void startFileDrag(const QString &url, const QString &fileName);
 
+    // === LiveKit 通话 ===
+    // 申请通话 token：POST /api/service/livekit/token { peerId }
+    // 成功后 emit liveKitTokenReady(token, roomName, wsUrl)
+    Q_INVOKABLE void getLiveKitToken(const QString &peerId, const QString &roomName = QString());
+
     // === 设置（持久化） ===
     // 保存登录配置到本地（userId + serverUrl），下次启动自动填充
     Q_INVOKABLE void saveLoginConfig(const QString &userId, const QString &serverUrl);
@@ -137,6 +142,10 @@ signals:
     void groupUpdated(const QString &groupId);       // 更新群信息成功
     void groupMemberChanged(const QString &groupId); // 群成员变化（邀请/踢出后刷新）
     void groupError(const QString &error);           // 群操作失败
+
+    // ── LiveKit 通话信号 ──
+    void liveKitTokenReady(const QString &token, const QString &roomName, const QString &wsUrl);
+    void liveKitTokenError(const QString &error);
 
     // ── 上传相关信号 ──
     void uploadSuccess(const QString &url, const QString &fileName, qint64 fileSize); // 文件上传成功

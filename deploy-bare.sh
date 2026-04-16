@@ -44,6 +44,10 @@ DB_USER="imhub"
 DB_PASS="imhub2024"
 DB_NAME="imhub"
 
+LIVEKIT_URL=""
+LIVEKIT_KEY=""
+LIVEKIT_SECRET=""
+
 # ---------- 解析参数 ----------
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -51,6 +55,12 @@ while [[ $# -gt 0 ]]; do
             DOMAIN="$2"; shift 2 ;;
         --branch|-b)
             BRANCH="$2"; shift 2 ;;
+        --livekit-url)
+            LIVEKIT_URL="$2"; shift 2 ;;
+        --livekit-key)
+            LIVEKIT_KEY="$2"; shift 2 ;;
+        --livekit-secret)
+            LIVEKIT_SECRET="$2"; shift 2 ;;
         *)
             shift ;;
     esac
@@ -140,6 +150,20 @@ fi
 
 # ---------- 写入配置（database.host = localhost）----------
 info "写入生产配置..."
+
+# 构建可选的 livekit 配置段
+LIVEKIT_YAML_BLOCK=""
+if [ -n "$LIVEKIT_URL" ] && [ -n "$LIVEKIT_KEY" ] && [ -n "$LIVEKIT_SECRET" ]; then
+    LIVEKIT_YAML_BLOCK="
+livekit:
+  ws_url: \"${LIVEKIT_URL}\"
+  api_key: \"${LIVEKIT_KEY}\"
+  api_secret: \"${LIVEKIT_SECRET}\""
+    info "LiveKit 语音通话已配置: ${LIVEKIT_URL}"
+else
+    warn "未提供 LiveKit 配置（--livekit-url/key/secret），语音通话功能将不可用"
+fi
+
 cat > "${INSTALL_DIR}/server/config/config.yaml" <<EOF
 server:
   port: ${PORT}
@@ -160,6 +184,7 @@ cleanup:
   enabled: true
   retention_days: 45
   cron: "0 3 * * *"
+${LIVEKIT_YAML_BLOCK}
 EOF
 
 # ---------- 构建前端 ----------

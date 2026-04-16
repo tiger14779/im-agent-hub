@@ -41,6 +41,9 @@ func SetupRouter(
 	// Client WebSocket
 	r.GET("/api/ws", chatHub.HandleClientWS)
 
+	// Client LiveKit token (called when accepting an incoming call)
+	r.POST("/api/livekit/token", ClientLiveKitToken())
+
 	// Service staff auth
 	r.POST("/api/service/auth/login", ServiceLogin())
 
@@ -73,6 +76,9 @@ func SetupRouter(
 		svc.DELETE("/groups/:id", ServiceDissolveGroup(chatHub))
 		svc.POST("/groups/:id/members", ServiceInviteToGroup(chatHub))
 		svc.DELETE("/groups/:id/members/:userId", ServiceKickFromGroup(chatHub))
+
+		// Staff LiveKit token (called when initiating a call)
+		svc.POST("/livekit/token", ServiceLiveKitToken())
 	}
 
 	// Admin routes (JWT + admin role required)

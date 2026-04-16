@@ -62,6 +62,10 @@
             @change="onFileSelected"
           />
         </label>
+        <button v-if="showCall" class="attach-item call-attach-item" @click="onCallClick">
+          <div class="attach-item-icon">📞</div>
+          <span>语音通话</span>
+        </button>
       </div>
     </transition>
   </div>
@@ -80,11 +84,14 @@
 import { ref, onUnmounted } from 'vue'
 import { AudioRecorder } from '@/utils/recorder'
 
+const props = withDefaults(defineProps<{ showCall?: boolean }>(), { showCall: false })
+
 const emit = defineEmits<{
   (e: 'send-text', text: string): void
   (e: 'send-image', file: File): void
   (e: 'send-file', file: File): void
   (e: 'send-voice', payload: { blob: Blob; duration: number }): void
+  (e: 'start-call'): void
 }>()
 
 const text = ref('')
@@ -166,6 +173,11 @@ function onFileSelected(e: Event) {
   ;(e.target as HTMLInputElement).value = ''
 }
 
+function onCallClick() {
+  showAttach.value = false
+  emit('start-call')
+}
+
 onUnmounted(() => {
   if (recordTimer) clearInterval(recordTimer)
   recorder.cancel()
@@ -173,6 +185,38 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* Voice call in attach popup */
+.call-attach-item {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: inherit;
+  font-family: inherit;
+  color: inherit;
+}
+.call-attach-item:active .attach-item-icon {
+  background: rgba(0, 0, 0, 0.08);
+}
+/* Voice call initiative button */
+.call-initiative-btn {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: none;
+  border-radius: 50%;
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+.call-initiative-btn:active {
+  background: rgba(0, 0, 0, 0.08);
+}
+
 /* Slide-up transition for attachment panel */
 .slide-up-enter-active,
 .slide-up-leave-active {

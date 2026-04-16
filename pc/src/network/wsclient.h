@@ -52,6 +52,13 @@ public:
     // 查询当前所有在线的H5客户端
     Q_INVOKABLE void queryOnline();
 
+    // ── 通话信令发送方法 ───────────────────────────────────────────
+    Q_INVOKABLE void sendCallInvite(const QString &toId, const QString &roomName,
+                                    const QString &livekitUrl, const QString &fromName);
+    Q_INVOKABLE void sendCallAccept(const QString &toId, const QString &roomName);
+    Q_INVOKABLE void sendCallReject(const QString &toId);
+    Q_INVOKABLE void sendCallEnd(const QString &toId, const QString &roomName);
+
 signals:
     void connectedChanged();                                    // 连接状态变化
     // 收到其他用户发来的新消息（经 OpenIM 轮询获取）
@@ -80,6 +87,18 @@ signals:
     void groupDissolved(const QString &groupId);
     // 群信息更新 (groupId, name, avatar)
     void groupInfoUpdated(const QString &groupId, const QString &name, const QString &avatar);
+    // ── 通话信令信号 ───────────────────────────────────────────────
+    // 对方发起通话邀请 (fromId, fromName, roomName, livekitUrl)
+    void callInviteReceived(const QString &fromId, const QString &fromName,
+                            const QString &roomName, const QString &livekitUrl);
+    // 对方接听了通话
+    void callAccepted(const QString &fromId, const QString &roomName);
+    // 对方拒绝了通话
+    void callRejected(const QString &fromId);
+    // 对方忙线（自动拒绝）
+    void callBusy(const QString &fromId);
+    // 对方挂断了通话
+    void callEnded(const QString &fromId);
 
 private slots:
     void onConnected();                                 // WS 连接成功

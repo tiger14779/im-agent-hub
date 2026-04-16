@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body>
+<script>
+/* LiveKit audio bridge - no UI, reports events via console.log('call:cmd:data') */
+var room = null;
+
+function report(cmd, data) {
+  console.log('call:' + cmd + (data !== undefined ? ':' + String(data) : ''));
+}
+
+window.setMicMuted = function(muted) {
+  if (room && room.localParticipant) {
+    room.localParticipant.setMicrophoneEnabled(!muted).catch(function(){});
+  }
+};
+
+document.addEventListener('DOMContentLoaded', function() {
+  var token = window.__callToken;
+  var wsUrl  = window.__callWsUrl;
+  var myId   = window.__callMyId || '';
+
+  if (!token || !wsUrl) {
+    report('error', 'missing-params');
+    return;
+  }
+
+  import('https://cdn.jsdelivr.net/npm/livekit-client@2/+esm')
+    .then(function(mod) {
+      var Room      = mod.Room;
+      var RoomEvent = mod.RoomEvent;
+
+      room = new Room({
+        audioCaptureDefaults: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
+
+      // livekit-client@2 uses AudioContext internally; must call startAudio()
+      // to keep it in "running" state, especially in headless WebEngineView
+      function ensureAudio() {
+        room.startAudio().then(function() {
+          report('audioCtx', 'running');
+        }).catch(function() {});
+      }
+
+      room.on(RoomEvent.Connected, function() {
+        report('connected');
+        ensureAudio();
+        room.localParticipant.setMicrophoneEnabled(true).catch(function(e) {
+          report('error', 'mic:' + ((e && e.message) ? e.message : 'failed'));
+        });
+      });
+
+      // Called when AudioContext needs to be resumed (e.g. after browser suspend)
+      room.on(RoomEvent.AudioPlaybackStatusChanged, function() {
+        if (!room.canPlaybackAudio) {
+          report('audioCtx', 'suspended-retrying');
+          ensureAudio();
+        }
+      });
+
+      room.on(RoomEvent.Disconnected, function(reason) {
+        report('disconnected', reason || '');
+      });
+
+      room.on(RoomEvent.Reconnecting, function() {
+        report('reconnecting');
+      });
+
+      room.on(RoomEvent.Reconnected, function() {
+        report('reconnected');
+        ensureAudio();
+        room.localParticipant.setMicrophoneEnabled(true).catch(function(){});
+      });
+
+      // Attach incoming audio tracks to <audio> elements so they play
+      room.on(RoomEvent.TrackSubscribed, function(track) {
+        if (track.kind === 'audio') {
+          var el = track.attach();
+          el.autoplay = true;
+          document.body.appendChild(el);
+          // Also try resuming AudioContext after track arrives
+          ensureAudio();
+          report('audio', 'subscribed');
+        }
+      });
+
+      room.on(RoomEvent.TrackUnsubscribed, function(track) {
+        track.detach();
+      });
+
+      room.on(RoomEvent.ActiveSpeakersChanged, function(speakers) {
+        var hasPeer = speakers.some(function(s) { return s.identity !== myId; });
+        report('speaking', hasPeer ? '1' : '0');
+      });
+
+      room.connect(wsUrl, token).catch(function(err) {
+        report('error', err.message || 'connect-failed');
+      });
+    })
+    .catch(function(err) {
+      report('error', err.message || 'load-failed');
+    });
+});
+</script>
+</body>
+</html>

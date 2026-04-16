@@ -294,8 +294,28 @@ func (h *ChatHub) readLoop(cc *ChatConn) {
 			h.handleVisibility(cc, env.Data)
 		case "query_online":
 			h.handleQueryOnline(cc)
+		// ── 通话信令中继 ──────────────────────────────────────────────
+		case "call_invite", "call_accept", "call_reject", "call_end", "call_busy":
+			h.relayCallSignal(cc, env.Type, env.Data)
 		}
 	}
+}
+
+// relayCallSignal forwards call control messages between participants.
+// All call signal payloads must contain "toId" (target user ID).
+func (h *ChatHub) relayCallSignal(cc *ChatConn, msgType string, data json.RawMessage) {
+	var req struct {
+		ToID string `json:"toId"`
+	}
+	if err := json.Unmarshal(data, &req); err != nil || req.ToID == "" {
+		log.Printf("[WS] %s invalid call signal from %s: missing toId", msgType, cc.userID)
+		return
+	}
+	log.Printf("[WS] %s: %s → %s", msgType, cc.userID, req.ToID)
+	h.sendToUser(req.ToID, map[string]interface{}{
+		"type": msgType,
+		"data": json.RawMessage(data),
+	})
 }
 
 // handleSendMessage processes a message from any connected user.

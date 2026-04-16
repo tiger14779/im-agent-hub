@@ -251,3 +251,110 @@ void WxBridge::pushToCallback(const QJsonObject &payload)
     });
 }
 
+// ── LiveKit 信令 WebSocket 代理 ───────────────────────────────────────────
+// 用 Qt 的 QWebSocket (Windows Schannel TLS) 代理连接到 wss://livekit...
+// 解决 QtWebEngine Chromium BoringSSL 与 LiveKit TLS 不兼容的问题
+
+bool WxBridge::startLivekitProxy(const QString &realWsBaseUrl, quint16 localPort)
+{
+    stopLivekitProxy();
+
+    m_livekitBaseWsUrl = realWsBaseUrl;
+    m_wsProxyServer = new QWebSocketServer(
+        QStringLiteral("LiveKitProxy"),
+        QWebSocketServer::NonSecureMode,
+        this);
+
+    if (!m_wsProxyServer->listen(QHostAddress::LocalHost, localPort)) {
+        qWarning() << "[LKProxy] Failed to listen on port" << localPort
+                   << m_wsProxyServer->errorString();
+        delete m_wsProxyServer;
+        m_wsProxyServer = nullptr;
+        return false;
+    }
+
+    connect(m_wsProxyServer, &QWebSocketServer::newConnection, this, [this]() {
+        QWebSocket *local = m_wsProxyServer->nextPendingConnection();
+        if (!local) return;
+
+        // 把本地连接 URL 的 path+query 拼接到真实 LiveKit 地址
+        QUrl remoteUrl(m_livekitBaseWsUrl
+                       + local->requestUrl().path()
+                       + (local->requestUrl().hasQuery()
+                              ? QStringLiteral("?") + local->requestUrl().query()
+                              : QString()));
+        qDebug() << "[LKProxy] new local connection, forwarding to" << remoteUrl;
+
+        QWebSocket *remote = new QWebSocket(QString(), QWebSocketProtocol::VersionLatest, this);
+
+        // 忽略 SSL 错误（使用系统 Schannel 时通常不需要，但保险起见）
+        connect(remote, QOverload<const QList<QSslError>&>::of(&QWebSocket::sslErrors),
+                remote, [remote](const QList<QSslError> &errors) {
+            qWarning() << "[LKProxy] SSL errors (ignored):" << errors;
+            remote->ignoreSslErrors();
+        });
+
+        m_proxyLocal2Remote[local] = remote;
+
+        // 本地 → 远端
+        connect(local, &QWebSocket::textMessageReceived,
+                remote, &QWebSocket::sendTextMessage);
+        connect(local, &QWebSocket::binaryMessageReceived,
+                remote, &QWebSocket::sendBinaryMessage);
+
+        // 远端 → 本地
+        connect(remote, &QWebSocket::textMessageReceived,
+                local, &QWebSocket::sendTextMessage);
+        connect(remote, &QWebSocket::binaryMessageReceived,
+                local, &QWebSocket::sendBinaryMessage);
+
+        // 任意一端断开，关闭另一端
+        connect(local, &QWebSocket::disconnected, this, [this, local]() {
+            qDebug() << "[LKProxy] local disconnected";
+            if (QWebSocket *r = m_proxyLocal2Remote.take(local)) {
+                r->close();
+                r->deleteLater();
+            }
+            local->deleteLater();
+        });
+        connect(remote, &QWebSocket::disconnected, this, [this, local, remote]() {
+            qDebug() << "[LKProxy] remote disconnected";
+            if (m_proxyLocal2Remote.contains(local)) {
+                m_proxyLocal2Remote.remove(local);
+                local->close();
+                local->deleteLater();
+            }
+            remote->deleteLater();
+        });
+
+        connect(remote, &QWebSocket::errorOccurred, this,
+                [remote](QAbstractSocket::SocketError err) {
+            qWarning() << "[LKProxy] remote socket error:" << err << remote->errorString();
+        });
+
+        remote->open(remoteUrl);
+    });
+
+    qDebug() << "[LKProxy] Listening on ws://localhost:" << localPort
+             << "→" << realWsBaseUrl;
+    return true;
+}
+
+void WxBridge::stopLivekitProxy()
+{
+    if (m_wsProxyServer) {
+        m_wsProxyServer->close();
+        // 关闭所有代理连接
+        for (auto it = m_proxyLocal2Remote.begin(); it != m_proxyLocal2Remote.end(); ++it) {
+            it.key()->close();
+            it.value()->close();
+            it.value()->deleteLater();
+            it.key()->deleteLater();
+        }
+        m_proxyLocal2Remote.clear();
+        delete m_wsProxyServer;
+        m_wsProxyServer = nullptr;
+        qDebug() << "[LKProxy] stopped";
+    }
+}
+

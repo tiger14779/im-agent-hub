@@ -13,6 +13,7 @@ find_package(Qt6 6.7 REQUIRED COMPONENTS
     WebSockets
     Multimedia
     Sql
+    WebEngineQuick
 )
 
 qt_standard_project_setup(REQUIRES 6.7)
@@ -49,6 +50,7 @@ set(QML_FILES
     qml/components/ChatInput.qml
     qml/components/MessageBubble.qml
     qml/components/ImageViewer.qml
+    qml/components/VoiceCallWindow.qml
 )
 
 qt_add_executable(${PROJECT_NAME}
@@ -67,6 +69,7 @@ qt_add_qml_module(${PROJECT_NAME}
     QML_FILES ${QML_FILES}
     RESOURCES
         resources/notify.wav
+        resources/call.html
     RESOURCE_PREFIX /
 )
 
@@ -77,6 +80,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt6::WebSockets
     Qt6::Multimedia
     Qt6::Sql
+    Qt6::WebEngineQuick
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE
