@@ -43,13 +43,20 @@ public:
                                        const QString &content, const QString &clientMsgId);
 
     // 加载与某个用户的历史聊天记录（支持分页）
-    Q_INVOKABLE void loadHistory(const QString &peerUserId, qint64 beforeSeq = 0, int limit = 50);
+    // afterSeq > 0 时为增量拉取（只返回 seq > afterSeq 的新消息）
+    Q_INVOKABLE void loadHistory(const QString &peerUserId, qint64 beforeSeq = 0, int limit = 50, qint64 afterSeq = 0);
 
     // 删除消息（通过 serverMsgId）
     Q_INVOKABLE void deleteMessage(const QString &serverMsgId);
 
     // 查询当前所有在线的H5客户端
     Q_INVOKABLE void queryOnline();
+
+    // ── 通话信令发送方法 ───────────────────────────────────────────
+    Q_INVOKABLE void sendCallInvite(const QString &toId, const QString &fromName);
+    Q_INVOKABLE void sendCallAccept(const QString &toId);
+    Q_INVOKABLE void sendCallReject(const QString &toId);
+    Q_INVOKABLE void sendCallEnd(const QString &toId);
 
 signals:
     void connectedChanged();                                    // 连接状态变化
@@ -79,6 +86,19 @@ signals:
     void groupDissolved(const QString &groupId);
     // 群信息更新 (groupId, name, avatar)
     void groupInfoUpdated(const QString &groupId, const QString &name, const QString &avatar);
+    // ── 通话信令信号 ───────────────────────────────────────────────
+    // 对方发起通话邀请 (fromId, fromName)
+    void callInviteReceived(const QString &fromId, const QString &fromName);
+    // 对方接听了通话
+    void callAccepted(const QString &fromId);
+    // 对方拒绝了通话
+    void callRejected(const QString &fromId);
+    // 对方忙线（自动拒绝）
+    void callBusy(const QString &fromId);
+    // 对方挂断了通话
+    void callEnded(const QString &fromId);
+    // 服务端下发音频中继凭证 (roomId, token, wsBase)
+    void callAudioReady(const QString &roomId, const QString &token, const QString &wsBase);
 
 private slots:
     void onConnected();                                 // WS 连接成功

@@ -12,6 +12,10 @@
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QWindow>
+#include <QQmlNetworkAccessManagerFactory>
+#include <QNetworkAccessManager>
+#include <QNetworkDiskCache>
+#include <QStandardPaths>
 
 // 全局日志文件，将 qDebug 输出重定向到文件
 static QFile *g_logFile = nullptr;
@@ -38,6 +42,25 @@ void fileMessageHandler(QtMsgType type, const QMessageLogContext &ctx, const QSt
 
 static const char *kAppKey = "ImAgentHub_SingleInstance_Key";
 static const char *kServerName = "ImAgentHub_LocalServer";
+
+// QML 引擎网络访问管理工厂 —— 为所有 Image 组件提供 HTTP 磁盘缓存
+// 切换会话后图片/头像从本地缓存秒显，不再每次重新下载
+class CachedNamFactory : public QQmlNetworkAccessManagerFactory
+{
+public:
+    QNetworkAccessManager *create(QObject *parent) override
+    {
+        auto *nam = new QNetworkAccessManager(parent);
+        auto *diskCache = new QNetworkDiskCache(nam);
+        QString cacheDir = QStandardPaths::writableLocation(
+                               QStandardPaths::CacheLocation) + "/img_cache";
+        diskCache->setCacheDirectory(cacheDir);
+        diskCache->setMaximumCacheSize(300LL * 1024 * 1024); // 300 MB 上限
+        nam->setCache(diskCache);
+        qDebug() << "[CachedNam] 磁盘缓存目录:" << cacheDir;
+        return nam;
+    }
+};
 
 // 尝试通知已有实例显示窗口，成功返回 true（说明已有实例在运行）
 static bool notifyRunningInstance()
@@ -112,7 +135,10 @@ int main(int argc, char *argv[])
 
     QQuickStyle::setStyle("Basic");
 
+    // 图片磁盘缓存（300MB）：QML Image 加载 HTTP 资源时自动命中缓存，切换会话不再重新下载
+    CachedNamFactory namFactory;
     QQmlApplicationEngine engine;
+    engine.setNetworkAccessManagerFactory(&namFactory);
 
     // 确保 QML 引擎能找到 Qt 自带的 QML 模块（如 QtMultimedia）
     // 从 build 目录运行时，QLibraryInfo 路径是相对于 exe 的，

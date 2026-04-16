@@ -86,6 +86,8 @@ public:
     Q_INVOKABLE void downloadAndOpen(const QString &url, const QString &fileName);
     // 下载文件到指定保存路径
     Q_INVOKABLE void downloadToPath(const QString &url, const QString &savePath);
+    // 后台异步缓存媒体文件到 media_cache 目录（图片/语音/文件），完成后 emit mediaDownloaded
+    Q_INVOKABLE void downloadMedia(const QString &url, const QString &clientMsgID);
 
     // === 剪贴板 ===
     // 复制文本到系统剪贴板
@@ -144,6 +146,7 @@ signals:
     // ── 下载相关信号 ──
     void downloadFinished(const QString &localPath); // 下载完成，localPath 为本地路径
     void downloadFailed(const QString &error);       // 下载失败
+    void mediaDownloaded(const QString &clientMsgID, const QString &localPath); // 媒体文件后台缓存完成
 
 private:
     // 统一处理网络响应：解析 JSON、校验 code、回调 onSuccess/onError

@@ -9,6 +9,8 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QHash>
+#include <QWebSocketServer>
+#include <QWebSocket>
 #include <QtQml/qqmlregistration.h>
 
 /**
@@ -45,6 +47,11 @@ public:
     // 推送好友列表到财务软件（端口 7888）
     Q_INVOKABLE void pushFriendList(const QJsonArray &contacts);
 
+    // LiveKit 信令代理：在 localPort 监听，将 WebSocket 流量转发到 realWsBaseUrl
+    // 用于绕开 QtWebEngine Chromium 的 TLS 兼容问题（用 Qt/Schannel 处理 SSL）
+    Q_INVOKABLE bool startLivekitProxy(const QString &realWsBaseUrl, quint16 localPort = 8889);
+    Q_INVOKABLE void stopLivekitProxy();
+
 signals:
     void listeningChanged();  // 监听状态变化
 
@@ -70,6 +77,11 @@ private:
     QNetworkAccessManager m_nam;           // 用于推送数据的网络管理器
     QHash<QTcpSocket*, QByteArray> m_buffers; // 各连接的接收缓冲区
     QHash<QString, qint64> m_recentCommands;  // 去重：type+wxid+path → 时间戳（5秒窗口）
+
+    // LiveKit 信令代理
+    QWebSocketServer *m_wsProxyServer = nullptr;
+    QString m_livekitBaseWsUrl;                        // 真实 LiveKit wss:// 地址
+    QHash<QWebSocket*, QWebSocket*> m_proxyLocal2Remote; // 本地 socket → 远程 socket
 
     bool m_listening = false;
     static constexpr int m_apiPort = 8888;       // 监听端口：接收财务软件指令

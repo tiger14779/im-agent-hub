@@ -25,6 +25,7 @@ set(SOURCES
     src/network/httpclient.cpp
     src/network/wsclient.cpp
     src/network/wxbridge.cpp
+    src/network/audiocallengine.cpp
     src/database/messagecache.cpp
 )
 
@@ -34,6 +35,7 @@ set(HEADERS
     src/network/httpclient.h
     src/network/wsclient.h
     src/network/wxbridge.h
+    src/network/audiocallengine.h
     src/database/messagecache.h
 )
 
@@ -49,6 +51,7 @@ set(QML_FILES
     qml/components/ChatInput.qml
     qml/components/MessageBubble.qml
     qml/components/ImageViewer.qml
+    qml/components/VoiceCallWindow.qml
 )
 
 qt_add_executable(${PROJECT_NAME}
@@ -67,6 +70,7 @@ qt_add_qml_module(${PROJECT_NAME}
     QML_FILES ${QML_FILES}
     RESOURCES
         resources/notify.wav
+        resources/lingsheng.wav
     RESOURCE_PREFIX /
 )
 

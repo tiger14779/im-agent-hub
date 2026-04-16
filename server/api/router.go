@@ -41,6 +41,9 @@ func SetupRouter(
 	// Client WebSocket
 	r.GET("/api/ws", chatHub.HandleClientWS)
 
+	// WebSocket audio relay — handles PCM audio forwarding between PC and H5
+	r.GET("/api/call/audio", HandleAudioWS)
+
 	// Service staff auth
 	r.POST("/api/service/auth/login", ServiceLogin())
 

@@ -294,8 +294,77 @@ func (h *ChatHub) readLoop(cc *ChatConn) {
 			h.handleVisibility(cc, env.Data)
 		case "query_online":
 			h.handleQueryOnline(cc)
+		// ── 通话信令中继 ──────────────────────────────────────────────
+		case "call_invite", "call_reject", "call_end", "call_busy":
+			h.relayCallSignal(cc, env.Type, env.Data)
+		case "call_accept":
+			// Relay the accept AND generate audio relay credentials for both parties.
+			h.handleCallAccept(cc, env.Data)
 		}
 	}
+}
+
+// relayCallSignal forwards call control messages between participants.
+// All call signal payloads must contain "toId" (target user ID).
+func (h *ChatHub) relayCallSignal(cc *ChatConn, msgType string, data json.RawMessage) {
+	var req struct {
+		ToID string `json:"toId"`
+	}
+	if err := json.Unmarshal(data, &req); err != nil || req.ToID == "" {
+		log.Printf("[WS] %s invalid call signal from %s: missing toId", msgType, cc.userID)
+		return
+	}
+	log.Printf("[WS] %s: %s → %s", msgType, cc.userID, req.ToID)
+	h.sendToUser(req.ToID, map[string]interface{}{
+		"type": msgType,
+		"data": json.RawMessage(data),
+	})
+}
+
+// handleCallAccept relays call_accept and sends call_audio_ready with room credentials to both parties.
+func (h *ChatHub) handleCallAccept(cc *ChatConn, data json.RawMessage) {
+	var req struct {
+		ToID   string `json:"toId"`
+		FromID string `json:"fromId"`
+	}
+	if err := json.Unmarshal(data, &req); err != nil || req.ToID == "" {
+		log.Printf("[WS] call_accept invalid from %s: missing toId", cc.userID)
+		return
+	}
+	log.Printf("[WS] call_accept: %s → %s", cc.userID, req.ToID)
+
+	// 1. Relay the accept signal to the caller
+	h.sendToUser(req.ToID, map[string]interface{}{
+		"type": "call_accept",
+		"data": json.RawMessage(data),
+	})
+
+	// 2. Generate room credentials (roomId + per-party HMAC tokens)
+	roomID := GenerateRoomID()
+	tokenCaller := GenerateAudioToken(roomID, req.ToID)  // for the caller
+	tokenCallee := GenerateAudioToken(roomID, cc.userID) // for the callee (current conn)
+
+	// 3. Determine relay base URL from config (empty = self-relay, client uses own host)
+	wilBase := buildAudioWsUrlFromConfig()
+
+	// 4. Send call_audio_ready to both parties
+	// wsBase is empty when relay_ws_url is not configured; clients fall back to own server.
+	h.sendToUser(req.ToID, map[string]interface{}{
+		"type": "call_audio_ready",
+		"data": map[string]interface{}{
+			"roomId": roomID,
+			"token":  tokenCaller,
+			"wsBase": wilBase,
+		},
+	})
+	h.sendJSON(cc, map[string]interface{}{
+		"type": "call_audio_ready",
+		"data": map[string]interface{}{
+			"roomId": roomID,
+			"token":  tokenCallee,
+			"wsBase": wilBase,
+		},
+	})
 }
 
 // handleSendMessage processes a message from any connected user.
@@ -397,6 +466,7 @@ func (h *ChatHub) handleLoadHistory(cc *ChatConn, data json.RawMessage) {
 	var req struct {
 		PeerUserID string `json:"peerUserId"`
 		BeforeSeq  int64  `json:"beforeSeq"` // 0 = latest
+		AfterSeq   int64  `json:"afterSeq"`  // > 0 = incremental: only return seq > afterSeq
 		Limit      int    `json:"limit"`     // default 50
 	}
 	if err := json.Unmarshal(data, &req); err != nil {
@@ -410,7 +480,22 @@ func (h *ChatHub) handleLoadHistory(cc *ChatConn, data json.RawMessage) {
 	} else {
 		convID = service.MakeConversationID(cc.userID, req.PeerUserID)
 	}
-	msgs, err := h.msgSvc.GetHistory(convID, req.BeforeSeq, req.Limit)
+
+	var msgs []model.Message
+	var err error
+	var hasMore bool
+
+	if req.AfterSeq > 0 {
+		// 增量模式：只拉取 afterSeq 之后的新消息（切换已有缓存的会话时使用）
+		msgs, err = h.msgSvc.GetNewMessages(convID, req.AfterSeq)
+		hasMore = false // 增量模式不支持向上翻页
+	} else {
+		if req.Limit <= 0 {
+			req.Limit = 50
+		}
+		msgs, err = h.msgSvc.GetHistory(convID, req.BeforeSeq, req.Limit)
+		hasMore = len(msgs) >= req.Limit
+	}
 
 	resp := map[string]interface{}{
 		"type": "history",
@@ -418,7 +503,8 @@ func (h *ChatHub) handleLoadHistory(cc *ChatConn, data json.RawMessage) {
 			"peerUserId":     req.PeerUserID,
 			"conversationId": convID,
 			"messages":       msgs,
-			"hasMore":        len(msgs) >= req.Limit || (req.Limit == 0 && len(msgs) >= 50),
+			"hasMore":        hasMore,
+			"afterSeq":       req.AfterSeq, // 透传，客户端据此判断是增量还是全量
 		},
 	}
 	if err != nil {
@@ -427,6 +513,7 @@ func (h *ChatHub) handleLoadHistory(cc *ChatConn, data json.RawMessage) {
 			"peerUserId": req.PeerUserID,
 			"messages":   []interface{}{},
 			"hasMore":    false,
+			"afterSeq":   req.AfterSeq,
 		}
 	}
 

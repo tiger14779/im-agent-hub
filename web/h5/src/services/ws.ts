@@ -50,6 +50,24 @@ interface ServerMessage {
   senderAvatar?: string
 }
 
+// ── 通话信令类型 ──────────────────────────────────────────────────
+export interface CallInviteData {
+  fromId: string
+  fromName: string
+  toId: string
+}
+
+export interface CallSignalData {
+  fromId: string
+  toId: string
+}
+
+export interface CallAudioReadyData {
+  roomId: string
+  token: string
+  wsBase: string
+}
+
 type Envelope = { type: string; data: unknown }
 
 class ChatWsService {
@@ -92,6 +110,13 @@ class ChatWsService {
   onGroupMemberRemoved: (groupId: string, userId: string) => void = () => {}
   onGroupDissolved: (groupId: string) => void = () => {}
   onNewGroupMessage: (msg: Message & { groupId: string; groupName: string }) => void = () => {}
+  // ── 通话信令回调 ──────────────────────────────────────────────────
+  onCallInvite: (data: CallInviteData) => void = () => {}
+  onCallAccept: (data: CallSignalData) => void = () => {}
+  onCallReject: (data: CallSignalData) => void = () => {}
+  onCallBusy: (data: CallSignalData) => void = () => {}
+  onCallEnd: (data: CallSignalData) => void = () => {}
+  onCallAudioReady: (data: CallAudioReadyData) => void = () => {}
 
   /** Build the WebSocket URL based on current page origin */
   private buildWsUrl(): string {
@@ -220,6 +245,37 @@ class ChatWsService {
         msg.isGroup = true
         msg.senderName = raw.senderName
         this.onNewGroupMessage(msg)
+        break
+      }
+      // ── 通话信令 ──────────────────────────────────────────────────
+      case 'call_invite': {
+        const d = env.data as CallInviteData
+        this.onCallInvite(d)
+        break
+      }
+      case 'call_accept': {
+        const d = env.data as CallSignalData
+        this.onCallAccept(d)
+        break
+      }
+      case 'call_reject': {
+        const d = env.data as CallSignalData
+        this.onCallReject(d)
+        break
+      }
+      case 'call_busy': {
+        const d = env.data as CallSignalData
+        this.onCallBusy(d)
+        break
+      }
+      case 'call_end': {
+        const d = env.data as CallSignalData
+        this.onCallEnd(d)
+        break
+      }
+      case 'call_audio_ready': {
+        const d = env.data as CallAudioReadyData
+        this.onCallAudioReady(d)
         break
       }
       default:
@@ -440,6 +496,27 @@ class ChatWsService {
 
   markRead(peerUserId: string) {
     this.send('mark_read', { peerUserId })
+  }
+
+  // ── 通话信令发送方法 ──────────────────────────────────────────────
+  sendCallInvite(toId: string, fromName: string) {
+    this.send('call_invite', { toId, fromId: this.userId, fromName })
+  }
+
+  sendCallAccept(toId: string) {
+    this.send('call_accept', { toId, fromId: this.userId })
+  }
+
+  sendCallReject(toId: string) {
+    this.send('call_reject', { toId, fromId: this.userId })
+  }
+
+  sendCallBusy(toId: string) {
+    this.send('call_busy', { toId, fromId: this.userId })
+  }
+
+  sendCallEnd(toId: string) {
+    this.send('call_end', { toId, fromId: this.userId })
   }
 
   disconnect() {

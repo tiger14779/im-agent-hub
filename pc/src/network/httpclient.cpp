@@ -19,6 +19,7 @@
 #include <QDateTime>
 #include <QDrag>
 #include <QWindow>
+#include <QStandardPaths>
 
 HttpClient::HttpClient(QObject *parent)
     : QObject(parent)
@@ -540,6 +541,13 @@ void HttpClient::downloadAndOpen(const QString &url, const QString &fileName)
         return;
     }
 
+    // 如果已是本地 file:// 路径，直接用系统应用打开无需下载
+    if (url.startsWith("file://")) {
+        QDesktopServices::openUrl(QUrl(url));
+        emit downloadFinished(QUrl(url).toLocalFile());
+        return;
+    }
+
     // 将相对URL拼接为完整地址
     QString fullUrl = url;
     if (url.startsWith('/'))
@@ -605,6 +613,50 @@ void HttpClient::downloadToPath(const QString &url, const QString &savePath)
         file.close();
 
         emit downloadFinished(savePath);
+    });
+}
+
+void HttpClient::downloadMedia(const QString &url, const QString &clientMsgID)
+{
+    if (url.isEmpty() || clientMsgID.isEmpty()) return;
+
+    // 确保媒体缓存目录存在
+    QString mediaDir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/media_cache";
+    QDir().mkpath(mediaDir);
+
+    // 从 URL 提取文件扩展名（如 .jpg、.mp3、.pdf）
+    QString ext = QFileInfo(QUrl(url).path()).suffix().toLower();
+    if (ext.isEmpty() || ext.length() > 6)
+        ext = "bin";
+
+    QString localPath = mediaDir + "/" + clientMsgID + "." + ext;
+
+    // 已有缓存，直接返回本地路径
+    if (QFile::exists(localPath)) {
+        emit mediaDownloaded(clientMsgID, localPath);
+        return;
+    }
+
+    // 将相对URL拼接为完整地址
+    QString fullUrl = url;
+    if (url.startsWith('/'))
+        fullUrl = m_baseUrl + url;
+
+    QNetworkRequest req{QUrl{fullUrl}};
+    QNetworkReply *reply = m_nam.get(req);
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply, localPath, clientMsgID]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            // 下载失败不干扮正常消息显示，静默失败
+            return;
+        }
+        QFile file(localPath);
+        if (!file.open(QIODevice::WriteOnly)) return;
+        file.write(reply->readAll());
+        file.close();
+
+        emit mediaDownloaded(clientMsgID, localPath);
     });
 }
 

@@ -17,3 +17,7 @@ cleanup:
   enabled: true
   retention_days: 45
   cron: "0 3 * * *"
+
+voice_relay:
+  secret: "im-agent-hub-voice-relay-secret-change-me"
+  relay_ws_url: ""  # empty = self (use incoming request Host); set to wss://jp.domain.com/api/call/audio on non-JP servers

@@ -179,10 +179,10 @@ void WsClient::checkAckTimeouts()
     }
 }
 
-void WsClient::loadHistory(const QString &peerUserId, qint64 beforeSeq, int limit)
+void WsClient::loadHistory(const QString &peerUserId, qint64 beforeSeq, int limit, qint64 afterSeq)
 {
     qDebug() << "[WsClient] loadHistory connected=" << m_connected << "peerUserId=" << peerUserId
-             << "beforeSeq=" << beforeSeq << "limit=" << limit;
+             << "beforeSeq=" << beforeSeq << "afterSeq=" << afterSeq << "limit=" << limit;
 
     if (!m_connected) {
         qDebug() << "[WsClient] loadHistory skipped: not connected, saving pending request";
@@ -196,8 +196,10 @@ void WsClient::loadHistory(const QString &peerUserId, qint64 beforeSeq, int limi
 
     QJsonObject data;
     data["peerUserId"] = peerUserId;
-    if (beforeSeq > 0)
-        data["beforeSeq"] = beforeSeq;
+    if (afterSeq > 0)
+        data["afterSeq"] = afterSeq;  // 增量模式
+    else if (beforeSeq > 0)
+        data["beforeSeq"] = beforeSeq; // 向上翻页模式
     data["limit"] = limit;
 
     QJsonObject envelope;
@@ -398,5 +400,82 @@ void WsClient::handleWsMessage(const QJsonObject &envelope)
                  << "sendId=" << data["sendId"].toString()
                  << "senderName=" << data["senderName"].toString();
         emit newGroupMessage(data);
+    // ── 通话信令 ──────────────────────────────────────────────────
+    } else if (type == "call_invite") {
+        QString fromId   = data["fromId"].toString();
+        QString fromName = data["fromName"].toString();
+        qDebug() << "[WsClient] call_invite from=" << fromId;
+        emit callInviteReceived(fromId, fromName);
+    } else if (type == "call_accept") {
+        QString fromId = data["fromId"].toString();
+        qDebug() << "[WsClient] call_accept from=" << fromId;
+        emit callAccepted(fromId);
+    } else if (type == "call_audio_ready") {
+        QString roomId = data["roomId"].toString();
+        QString token  = data["token"].toString();
+        QString wsBase = data["wsBase"].toString();
+        qDebug() << "[WsClient] call_audio_ready room=" << roomId;
+        emit callAudioReady(roomId, token, wsBase);
+    } else if (type == "call_reject") {
+        QString fromId = data["fromId"].toString();
+        qDebug() << "[WsClient] call_reject from=" << fromId;
+        emit callRejected(fromId);
+    } else if (type == "call_busy") {
+        QString fromId = data["fromId"].toString();
+        qDebug() << "[WsClient] call_busy from=" << fromId;
+        emit callBusy(fromId);
+    } else if (type == "call_end") {
+        QString fromId = data["fromId"].toString();
+        qDebug() << "[WsClient] call_end from=" << fromId;
+        emit callEnded(fromId);
     }
+}
+
+void WsClient::sendCallInvite(const QString &toId, const QString &fromName)
+{
+    if (!m_connected) return;
+    QJsonObject data;
+    data["toId"]     = toId;
+    data["fromId"]   = m_staffId;
+    data["fromName"] = fromName;
+    QJsonObject env;
+    env["type"] = QStringLiteral("call_invite");
+    env["data"] = data;
+    m_ws.sendTextMessage(QJsonDocument(env).toJson(QJsonDocument::Compact));
+}
+
+void WsClient::sendCallAccept(const QString &toId)
+{
+    if (!m_connected) return;
+    QJsonObject data;
+    data["toId"]   = toId;
+    data["fromId"] = m_staffId;
+    QJsonObject env;
+    env["type"] = QStringLiteral("call_accept");
+    env["data"] = data;
+    m_ws.sendTextMessage(QJsonDocument(env).toJson(QJsonDocument::Compact));
+}
+
+void WsClient::sendCallReject(const QString &toId)
+{
+    if (!m_connected) return;
+    QJsonObject data;
+    data["toId"]   = toId;
+    data["fromId"] = m_staffId;
+    QJsonObject env;
+    env["type"] = QStringLiteral("call_reject");
+    env["data"] = data;
+    m_ws.sendTextMessage(QJsonDocument(env).toJson(QJsonDocument::Compact));
+}
+
+void WsClient::sendCallEnd(const QString &toId)
+{
+    if (!m_connected) return;
+    QJsonObject data;
+    data["toId"]   = toId;
+    data["fromId"] = m_staffId;
+    QJsonObject env;
+    env["type"] = QStringLiteral("call_end");
+    env["data"] = data;
+    m_ws.sendTextMessage(QJsonDocument(env).toJson(QJsonDocument::Compact));
 }

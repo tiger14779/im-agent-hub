@@ -44,6 +44,10 @@ DB_USER="imhub"
 DB_PASS="imhub2024"
 DB_NAME="imhub"
 
+LIVEKIT_URL=""
+LIVEKIT_KEY=""
+LIVEKIT_SECRET=""
+
 # ---------- 解析参数 ----------
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -51,6 +55,12 @@ while [[ $# -gt 0 ]]; do
             DOMAIN="$2"; shift 2 ;;
         --branch|-b)
             BRANCH="$2"; shift 2 ;;
+        --livekit-url)
+            LIVEKIT_URL="$2"; shift 2 ;;
+        --livekit-key)
+            LIVEKIT_KEY="$2"; shift 2 ;;
+        --livekit-secret)
+            LIVEKIT_SECRET="$2"; shift 2 ;;
         *)
             shift ;;
     esac
@@ -73,19 +83,48 @@ info "=========================================="
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 
+# ---------- apt 包装函数：自动等待锁 + 重试 ----------
+# -o DPkg::Lock::Timeout=300 让 apt 自己等锁最多 5 分钟，无需外部轮询
+APT="apt-get -y -qq -o DPkg::Lock::Timeout=300"
+
+apt_install() {
+    $APT install "$@" > /dev/null
+}
+
+# 首次启动时 unattended-upgrades 可能占用锁，先等它自然结束
+wait_apt_initial() {
+    local waited=0
+    info "检查 apt 锁状态..."
+    while fuser /var/lib/apt/lists/lock /var/lib/dpkg/lock-frontend &>/dev/null 2>&1; do
+        if [ $waited -eq 0 ]; then
+            info "系统后台更新进行中，等待完成（最多 5 分钟）..."
+        fi
+        sleep 5; waited=$((waited+5))
+        if [ $waited -ge 300 ]; then
+            warn "等待超时，强制清除 apt 锁..."
+            kill -9 $(fuser /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend 2>/dev/null) 2>/dev/null || true
+            rm -f /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend /var/cache/apt/archives/lock
+            dpkg --configure -a 2>/dev/null || true
+            break
+        fi
+    done
+    info "apt 锁已释放，继续安装..."
+}
+
 # ---------- 系统更新 ----------
 info "更新系统软件包..."
-apt-get update -qq
-apt-get install -y -qq curl wget git build-essential > /dev/null
+wait_apt_initial
+$APT update
+apt_install curl wget git build-essential
 
 # ---------- 安装 PostgreSQL ----------
 if ! command -v psql &> /dev/null; then
     info "正在安装 PostgreSQL 16..."
-    apt-get install -y -qq gnupg lsb-release > /dev/null
+    apt_install gnupg lsb-release
     curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/postgresql.gpg
     echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
-    apt-get update -qq
-    apt-get install -y -qq postgresql-16 > /dev/null
+    $APT update
+    apt_install postgresql-16
     systemctl enable --now postgresql
     info "PostgreSQL 16 安装完成"
 else
@@ -119,7 +158,7 @@ fi
 if ! command -v node &> /dev/null; then
     info "正在安装 Node.js ${NODE_VERSION}..."
     curl -fsSL "https://deb.nodesource.com/setup_${NODE_VERSION}.x" | bash - > /dev/null 2>&1
-    apt-get install -y -qq nodejs > /dev/null
+    apt_install nodejs
     info "Node.js $(node -v) 安装完成"
 else
     info "Node.js 已安装: $(node -v)"
@@ -140,6 +179,20 @@ fi
 
 # ---------- 写入配置（database.host = localhost）----------
 info "写入生产配置..."
+
+# 构建可选的 livekit 配置段
+LIVEKIT_YAML_BLOCK=""
+if [ -n "$LIVEKIT_URL" ] && [ -n "$LIVEKIT_KEY" ] && [ -n "$LIVEKIT_SECRET" ]; then
+    LIVEKIT_YAML_BLOCK="
+livekit:
+  ws_url: \"${LIVEKIT_URL}\"
+  api_key: \"${LIVEKIT_KEY}\"
+  api_secret: \"${LIVEKIT_SECRET}\""
+    info "LiveKit 语音通话已配置: ${LIVEKIT_URL}"
+else
+    warn "未提供 LiveKit 配置（--livekit-url/key/secret），语音通话功能将不可用"
+fi
+
 cat > "${INSTALL_DIR}/server/config/config.yaml" <<EOF
 server:
   port: ${PORT}
@@ -160,6 +213,7 @@ cleanup:
   enabled: true
   retention_days: 45
   cron: "0 3 * * *"
+${LIVEKIT_YAML_BLOCK}
 EOF
 
 # ---------- 构建前端 ----------
@@ -225,13 +279,13 @@ if [ -n "$DOMAIN" ]; then
     # 安装 Nginx 和 Certbot
     if ! command -v nginx &> /dev/null; then
         info "正在安装 Nginx..."
-        apt-get install -y -qq nginx > /dev/null
+        apt_install nginx
         systemctl enable --now nginx
     fi
 
     if ! command -v certbot &> /dev/null; then
         info "正在安装 Certbot..."
-        apt-get install -y -qq certbot python3-certbot-nginx > /dev/null
+        apt_install certbot python3-certbot-nginx
     fi
 
     # 生成 Nginx 配置

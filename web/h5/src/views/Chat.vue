@@ -1,5 +1,9 @@
 <template>
   <div class="chat-container">
+    <!-- 语音通话悬浮层（全局挂载，随时可接听） -->
+    <VoiceCall
+      v-if="userStore.userId"      ref="voiceCallRef"      :my-user-id="userStore.userId"
+    />
     <!-- Loading overlay -->
     <div v-if="state === 'loading'" class="chat-loading">
       <div class="spinner" />
@@ -80,10 +84,12 @@
 
         <!-- Chat input -->
         <ChatInput
+          :show-call="!activeConversationIsGroup"
           @send-text="onSendText"
           @send-image="onSendImage"
           @send-file="onSendFile"
           @send-voice="onSendVoice"
+          @start-call="onStartCall"
         />
       </template>
     </template>
@@ -116,6 +122,7 @@ import type { Message } from '@/types'
 import MessageList from '@/components/MessageList.vue'
 import ChatInput from '@/components/ChatInput.vue'
 import LotteryResult from '@/components/LotteryResult.vue'
+import VoiceCall from '@/components/VoiceCall.vue'
 
 type PageState = 'loading' | 'ready' | 'error'
 
@@ -137,6 +144,7 @@ const groups = ref<{ groupId: string; name: string; avatar: string }[]>([])
 const activeConversation = ref('')           // '' = show list; otherwise = active peer ID
 const activeConversationName = ref('')
 const activeConversationIsGroup = ref(false)
+const voiceCallRef = ref<InstanceType<typeof VoiceCall> | null>(null)
 
 let isSyncing = false // flag: true when reloading history after reconnect
 let pendingHistoryPeer = '' // race guard: expected peerUserId for the next history response
@@ -503,6 +511,14 @@ onUnmounted(() => {
   window.removeEventListener('popstate', onPopState)
   chatWs.disconnect()
 })
+
+// ── H5 用户主动发起语音通话 ────────────────────────────────────────
+function onStartCall() {
+  const peerId = activeConversation.value || serviceIdRef.value
+  if (!peerId) return
+  const peerName = activeConversationName.value || serviceUserName.value
+  voiceCallRef.value?.beginOutgoing(peerId, peerName)
+}
 </script>
 
 <style scoped>

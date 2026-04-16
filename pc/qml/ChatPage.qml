@@ -22,6 +22,9 @@ Page {
     property bool hasMoreHistory: true  // 是否还有更多历史消息
     property bool loadingMore: false    // 是否正在加载更多
     property bool _mergeMode: false     // 历史消息合并模式（重连/定时同步时使用）
+    property int  _pendingAfterSeq: 0   // 增量同步模式：最后一条缓存消息的 seq（>0 时触发增量拉取）
+    property var  _oldestCacheTime: 0   // 当前展示的最旧消息的 sendTime（本地缓存分页）
+    property bool _localCacheHasMore: false   // 本地缓存是否还有更早的消息未加载
 
     // 当前 Tab页: 0=聊天列表, 1=通讯录, 2=群组
     property int currentTab: 0
@@ -52,8 +55,12 @@ Page {
         onTriggered: {
             if (!loadingMore && !_mergeMode) {
                 console.log("[ChatPage] periodic sync for", activeChatId)
-                _mergeMode = true
-                WsClient.loadHistory(historyPeerId(), 0, 20)
+                // 同步时优先用 afterSeq 增量模式，只拉新增消息，避免旧消息出现在底部
+                if (_pendingAfterSeq === 0 && chatModel.count > 0) {
+                    // 没有待处理的增量请求，才进行 merge 同步
+                    _mergeMode = true
+                    WsClient.loadHistory(historyPeerId(), 0, 20)
+                }
             }
         }
     }
@@ -569,6 +576,38 @@ Page {
 
                         Item { Layout.fillWidth: true }
 
+                        // 🔊 语音通话按钮（仅私聊时显示）
+                        Rectangle {
+                            width: 32; height: 32; radius: 4
+                            visible: !activeChatIsGroup && activeChatId.length > 0
+                            color: callBtn.containsMouse ? "#e0e0e0" : "transparent"
+
+                            Label {
+                                anchors.centerIn: parent
+                                text: "📞"
+                                font.pixelSize: 16
+                            }
+
+                            MouseArea {
+                                id: callBtn
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (voiceCallWindow.phase !== "idle") return
+                                    voiceCallWindow.peerId   = activeChatId
+                                    voiceCallWindow.peerName = activeChatName || activeChatId
+                                    voiceCallWindow.myId     = staffUserId
+                                    voiceCallWindow.myName   = staffNickname
+                                    voiceCallWindow.phase    = "outgoing"
+                                    // 直接发起邀请，无需事先拿 token（token 由服务端下发）
+                                    WsClient.sendCallInvite(activeChatId, staffNickname)
+                                }
+                            }
+                            ToolTip.visible: callBtn.containsMouse
+                            ToolTip.text: "语音通话"
+                        }
+
                         // 群组成员管理按钮（仅群聊显示）
                         Rectangle {
                             width: 32; height: 32; radius: 4
@@ -665,10 +704,90 @@ Page {
         }
     }
 
+    // ── 语音通话窗口（通话中悬浮 + 来电/去电弹窗）──────────────
+    VoiceCallWindow {
+        id: voiceCallWindow
+        anchors.fill: parent
+        z: 100
+
+        // 来电：客服点击接听 → 发 call_accept 到服务端，等待 call_audio_ready 后开始通话
+        onCallAccepted: {
+            voiceCallWindow.phase = "connecting"
+            WsClient.sendCallAccept(voiceCallWindow.peerId)
+        }
+
+        // 来电：客服拒绝
+        onCallRejected: {
+            WsClient.sendCallReject(voiceCallWindow.peerId)
+            voiceCallWindow.reset()
+        }
+
+        // 通话结束（己方挂断）
+        onCallEnded: {
+            WsClient.sendCallEnd(voiceCallWindow.peerId)
+            voiceCallWindow.reset()
+        }
+    }
+
+    // WsClient 通话信令回调
+    Connections {
+        target: WsClient
+
+        function onCallInviteReceived(fromId, fromName) {
+            if (voiceCallWindow.phase !== "idle") {
+                // 已在通话中，自动回复忙线
+                WsClient.sendCallReject(fromId)
+                return
+            }
+            voiceCallWindow.peerId   = fromId
+            voiceCallWindow.peerName = fromName || fromId
+            voiceCallWindow.myId     = staffUserId
+            voiceCallWindow.myName   = staffNickname
+            voiceCallWindow.phase    = "incoming"
+        }
+
+        function onCallAccepted(fromId) {
+            // 对方接听，等 call_audio_ready 触发 startActiveCall
+            console.log("[AudioCall] call_accept from=", fromId, "phase=", voiceCallWindow.phase)
+        }
+
+        function onCallAudioReady(roomId, token, wsBase) {
+            console.log("[AudioCall] call_audio_ready room=", roomId, "phase=", voiceCallWindow.phase)
+            if (voiceCallWindow.phase === "outgoing" || voiceCallWindow.phase === "incoming" || voiceCallWindow.phase === "connecting") {
+                voiceCallWindow.roomId      = roomId
+                voiceCallWindow.audioToken  = token
+                voiceCallWindow.audioWsBase = wsBase
+                voiceCallWindow.startActiveCall()
+            }
+        }
+
+        function onCallRejected(fromId) {
+            if (voiceCallWindow.peerId === fromId) {
+                voiceCallWindow.statusMsg = "对方拒绝接听"
+                voiceCallWindow.autoCloseTimer.restart()
+                voiceCallWindow.outgoingTimeoutTimer.stop()
+            }
+        }
+
+        function onCallBusy(fromId) {
+            if (voiceCallWindow.peerId === fromId) {
+                voiceCallWindow.statusMsg = "对方忙线，请稍后再试"
+                voiceCallWindow.autoCloseTimer.restart()
+                voiceCallWindow.outgoingTimeoutTimer.stop()
+            }
+        }
+
+        function onCallEnded(fromId) {
+            if (voiceCallWindow.peerId === fromId) {
+                voiceCallWindow.reset()
+            }
+        }
+    }
+
     // ── 群组信息抽屉 ─────────────────────────────
     GroupInfoDrawer {
         id: groupInfoDrawer
-        height: chatRoot.height   // Drawer 在 Page 内需要显式绑定高度，否则默认 0
+        height: chatRoot.height
         // 将 Drawer 绑定在右侧聊天区域（Page 坐标）
         // Drawer 会从整个 Page 的右边缘推入
         onInviteMembersClicked: {
@@ -1297,23 +1416,45 @@ Page {
         activeChatId = userId
         activeChatName = contactModel.getNickname(userId)
         activeChatOnlineStatus = contactModel.getOnlineStatus(userId)
-        chatModel.clear()
         contactModel.clearUnread(userId)
         oldestSeq = 0
         hasMoreHistory = true
         loadingMore = false
+        _localCacheHasMore = false
+        _oldestCacheTime = 0
         if (groupInfoDrawer.position > 0) groupInfoDrawer.close()
 
         // 1) 先从本地 SQLite 缓存加载消息，立即显示
-        var cached = MessageCache.loadMessages(userId, 50)
+        var cached = MessageCache.loadMessages(userId, 20)
         if (cached.length > 0) {
             console.log("[ChatPage] 从本地缓存加载", cached.length, "条消息")
-            chatModel.prependMessages(cached)
-        }
+            // 有缓存：直接 replaceAll 替换旧内容，不调 clear()
+            // 避免 delegate 先销毁再重建，导致图片重新发起网络请求（闪烁/延迟）
+            chatModel.replaceAll(cached)
 
-        // 2) 从服务器拉取完整数据，替换缓存
-        _mergeMode = false
-        WsClient.loadHistory(userId)
+            // 找到缓存中最大 seq、最小 seq、最旧 sendTime，用于增量同步和分页
+            var maxSeq = 0
+            var minSeq = 0
+            for (var ci = 0; ci < cached.length; ci++) {
+                var s = cached[ci]["seq"] || 0
+                if (s > maxSeq) maxSeq = s
+                if (s > 0 && (minSeq === 0 || s < minSeq)) minSeq = s
+            }
+            _oldestCacheTime = cached[0]["sendTime"] ?? 0
+            _localCacheHasMore = (cached.length >= 20)
+            if (minSeq > 0) oldestSeq = minSeq  // 初始化服务器分页起点
+            _pendingAfterSeq = maxSeq
+            // 2) 增量模式：只向服务器拉取 seq > maxSeq 的新消息
+            _mergeMode = false
+            WsClient.loadHistory(userId, 0, 20, maxSeq)
+        } else {
+            // 无缓存：先清空旧消息再全量拉取
+            chatModel.clear()
+            _pendingAfterSeq = 0
+            // 2) 无缓存：全量拉取最新 50 条
+            _mergeMode = false
+            WsClient.loadHistory(userId)
+        }
     }
 
     function openGroupChat(groupId) {
@@ -1323,14 +1464,42 @@ Page {
         activeChatId = groupId
         activeChatName = groupModel.getNickname(groupId)
         activeChatOnlineStatus = ""
-        chatModel.clear()
         groupModel.clearUnread(groupId)
         oldestSeq = 0
         hasMoreHistory = true
         loadingMore = false
         _mergeMode = false
-        // 加载群历史消息（后端通过 conversationID="group_groupId" 查找，需再加一层前缀）
-        WsClient.loadHistory("group_" + groupId)
+        _localCacheHasMore = false
+        _oldestCacheTime = 0
+
+        // 1) 先从本地 SQLite 缓存加载消息，立即显示（与私聊一致）
+        var cached = MessageCache.loadMessages("group_" + groupId, 20)
+        if (cached.length > 0) {
+            console.log("[ChatPage] 群聊从本地缓存加载", cached.length, "条消息 groupId:", groupId)
+            // 有缓存：直接 replaceAll 替换旧内容，不调 clear()
+            chatModel.replaceAll(cached)
+
+            // 找到缓存中最大 seq、最小 seq、最旧 sendTime，用于同步和分页
+            var maxSeq = 0
+            var minSeq = 0
+            for (var ci = 0; ci < cached.length; ci++) {
+                var s = cached[ci]["seq"] || 0
+                if (s > maxSeq) maxSeq = s
+                if (s > 0 && (minSeq === 0 || s < minSeq)) minSeq = s
+            }
+            _oldestCacheTime = cached[0]["sendTime"] ?? 0
+            _localCacheHasMore = (cached.length >= 20)
+            if (minSeq > 0) oldestSeq = minSeq
+            _pendingAfterSeq = maxSeq
+            _mergeMode = false
+            WsClient.loadHistory("group_" + groupId, 0, 20, maxSeq)
+        } else {
+            // 无缓存：先清空旧消息再全量拉取
+            chatModel.clear()
+            _pendingAfterSeq = 0
+            // 从服务器拉取完整数据，替换缓存
+            WsClient.loadHistory("group_" + groupId)
+        }
     }
 
     // 打开群信息抽屉
@@ -1376,8 +1545,28 @@ Page {
     // 加载更多历史消息（向上滚动触发）
     function loadMoreHistory() {
         if (loadingMore || !hasMoreHistory || !activeChatId) return
+
+        // 先尝试从本地缓存加载更早的消息（避免不必要的服务器请求）
+        if (_localCacheHasMore && _oldestCacheTime > 0) {
+            var cachePeerId = activeChatIsGroup ? ("group_" + activeGroupId) : activeChatId
+            var moreCached = MessageCache.loadMessagesBefore(cachePeerId, _oldestCacheTime, 20)
+            if (moreCached.length > 0) {
+                _oldestCacheTime = moreCached[0]["sendTime"] ?? 0
+                _localCacheHasMore = (moreCached.length >= 20)
+                // 更新服务器分页起点（取新批消息中的最小 seq）
+                for (var ci = 0; ci < moreCached.length; ci++) {
+                    var sc = moreCached[ci]["seq"] ?? 0
+                    if (sc > 0 && (oldestSeq === 0 || sc < oldestSeq)) oldestSeq = sc
+                }
+                chatModel.prependMessages(moreCached)
+                return
+            }
+            _localCacheHasMore = false
+        }
+
+        // 本地缓存已用尽，请求服务器
         loadingMore = true
-        WsClient.loadHistory(historyPeerId(), oldestSeq, 50)
+        WsClient.loadHistory(historyPeerId(), oldestSeq, 20)
     }
 
     function sendImageMessage(filePath) {
@@ -1612,6 +1801,12 @@ Page {
                 }
             }
         }
+
+        // 媒体文件后台缓存完成 —— 用 file:// URL 替换消息列表中的网络URL，并持久化路径
+        function onMediaDownloaded(clientMsgID, localPath) {
+            chatModel.updateImageUrl(clientMsgID, "file:///" + localPath.replace(/\\/g, "/"))
+            MessageCache.setLocalPath(clientMsgID, localPath)
+        }
     }
 
     // ── WsClient 信号处理 ─────────────────────
@@ -1681,6 +1876,13 @@ Page {
             // 保存到本地缓存
             MessageCache.saveMessage(chatMsg)
 
+            // 后台缓存接收到的媒体文件（避免切换会话后重复下载图片）
+            var _dlUrl = ""
+            if (contentType === 102) _dlUrl = ((chatMsg["pictureElem"] || {})["sourcePicture"] || {})["url"] || ""
+            else if (contentType === 103) _dlUrl = (chatMsg["voiceElem"] || {})["sourceUrl"] || ""
+            else if (contentType === 105) _dlUrl = (chatMsg["fileElem"] || {})["sourceUrl"] || ""
+            if (_dlUrl && chatMsg["clientMsgID"]) HttpClient.downloadMedia(_dlUrl, chatMsg["clientMsgID"])
+
             // 播放消息提示音（仅收到别人的消息时）
             if (sendID !== staffUserId && chatRoot.notifySoundEnabled) {
                 notifyPlayer.stop()
@@ -1725,6 +1927,7 @@ Page {
                         "hasMore:", hasMore, "merge:", _mergeMode)
             if (peerUserId !== historyPeerId()) {
                 _mergeMode = false
+                _pendingAfterSeq = 0
                 return
             }
 
@@ -1744,6 +1947,7 @@ Page {
                     "recvID": m["recvID"] ?? "",
                     "contentType": ct,
                     "sendTime": m["sendTime"] ?? 0,
+                    "seq": m["seq"] ?? 0,
                     "status": 2,
                     "senderName": m["senderName"] ?? "",
                     "senderAvatar": m["senderAvatar"] ?? "",
@@ -1777,6 +1981,30 @@ Page {
 
             // 将服务器返回的消息批量保存到本地缓存
             MessageCache.saveMessages(parsed)
+
+            // 批量触发历史媒体消息的后台缓存下载（已有1本地缓存的则内部短路）
+            for (var _mi = 0; _mi < parsed.length; _mi++) {
+                var _m = parsed[_mi]
+                if (_m["localPath"]) continue  // 已有本地缓存，跳过
+                var _mUrl = ""
+                var _mct = _m["contentType"] ?? 101
+                if (_mct === 102) _mUrl = ((_m["pictureElem"] || {})["sourcePicture"] || {})["url"] || ""
+                else if (_mct === 103) _mUrl = (_m["voiceElem"] || {})["sourceUrl"] || ""
+                else if (_mct === 105) _mUrl = (_m["fileElem"] || {})["sourceUrl"] || ""
+                if (_mUrl && _m["clientMsgID"]) HttpClient.downloadMedia(_mUrl, _m["clientMsgID"])
+            }
+
+            if (_pendingAfterSeq > 0) {
+                // 增量同步模式：只追加比缓存更新的消息（不清空列表，不替换）
+                var prevAfterSeq = _pendingAfterSeq
+                _pendingAfterSeq = 0
+                if (parsed.length > 0) {
+                    console.log("[ChatPage] 增量同步 afterSeq=", prevAfterSeq, "追加", parsed.length, "条新消息")
+                    for (var k = 0; k < parsed.length; k++)
+                        chatModel.appendMessage(parsed[k])
+                }
+                return
+            }
 
             if (_mergeMode) {
                 // 合并模式（重连/定时同步）：仅追加新消息，appendMessage 内置去重
@@ -1812,8 +2040,14 @@ Page {
                 WsClient.queryOnline()
                 if (activeChatId) {
                     console.log("[ChatPage] WS reconnected, syncing history for", activeChatId)
+                    // 使用 afterSeq 增量模式同步：只拉当前模型中最大 seq 之后的新消息
+                    // 避免旧消息被追加到列表末尾（merge模式不知道当前seq范围会把旧消息 append 到底部）
+                    if (_pendingAfterSeq > 0) {
+                        // openChat 尚未完成增量请求，不重复发送
+                        return
+                    }
                     _mergeMode = true
-                    WsClient.loadHistory(historyPeerId(), 0, 50)
+                    WsClient.loadHistory(historyPeerId(), 0, 20)
                 }
             }
         }
@@ -1903,6 +2137,15 @@ Page {
             if (senderId !== staffUserId && chatRoot.notifySoundEnabled) {
                 notifyPlayer.stop()
                 notifyPlayer.play()
+            }
+
+            // 保存群消息到本地缓存（用于会话切换后的快速显示）
+            if (chatMsg["clientMsgID"]) {
+                MessageCache.saveMessage(chatMsg)
+                var _gDlUrl = ""
+                if (contentType === 102) _gDlUrl = ((chatMsg["pictureElem"] || {})["sourcePicture"] || {})["url"] || ""
+                else if (contentType === 105) _gDlUrl = (chatMsg["fileElem"] || {})["sourceUrl"] || ""
+                if (_gDlUrl) HttpClient.downloadMedia(_gDlUrl, chatMsg["clientMsgID"])
             }
 
             groupModel.updateLastMessage(groupId, preview, msg["sendTime"] ?? Date.now())
