@@ -402,17 +402,20 @@ void WsClient::handleWsMessage(const QJsonObject &envelope)
         emit newGroupMessage(data);
     // ── 通话信令 ──────────────────────────────────────────────────
     } else if (type == "call_invite") {
-        QString fromId     = data["fromId"].toString();
-        QString fromName   = data["fromName"].toString();
-        QString room       = data["roomName"].toString();
-        QString livekitUrl = data["livekitUrl"].toString();
-        qDebug() << "[WsClient] call_invite from=" << fromId << "room=" << room;
-        emit callInviteReceived(fromId, fromName, room, livekitUrl);
+        QString fromId   = data["fromId"].toString();
+        QString fromName = data["fromName"].toString();
+        qDebug() << "[WsClient] call_invite from=" << fromId;
+        emit callInviteReceived(fromId, fromName);
     } else if (type == "call_accept") {
         QString fromId = data["fromId"].toString();
-        QString room   = data["roomName"].toString();
         qDebug() << "[WsClient] call_accept from=" << fromId;
-        emit callAccepted(fromId, room);
+        emit callAccepted(fromId);
+    } else if (type == "call_audio_ready") {
+        QString roomId = data["roomId"].toString();
+        QString token  = data["token"].toString();
+        QString wsBase = data["wsBase"].toString();
+        qDebug() << "[WsClient] call_audio_ready room=" << roomId;
+        emit callAudioReady(roomId, token, wsBase);
     } else if (type == "call_reject") {
         QString fromId = data["fromId"].toString();
         qDebug() << "[WsClient] call_reject from=" << fromId;
@@ -428,29 +431,25 @@ void WsClient::handleWsMessage(const QJsonObject &envelope)
     }
 }
 
-void WsClient::sendCallInvite(const QString &toId, const QString &roomName,
-                               const QString &livekitUrl, const QString &fromName)
+void WsClient::sendCallInvite(const QString &toId, const QString &fromName)
 {
     if (!m_connected) return;
     QJsonObject data;
-    data["toId"]       = toId;
-    data["fromId"]     = m_staffId;
-    data["fromName"]   = fromName;
-    data["roomName"]   = roomName;
-    data["livekitUrl"] = livekitUrl;
+    data["toId"]     = toId;
+    data["fromId"]   = m_staffId;
+    data["fromName"] = fromName;
     QJsonObject env;
     env["type"] = QStringLiteral("call_invite");
     env["data"] = data;
     m_ws.sendTextMessage(QJsonDocument(env).toJson(QJsonDocument::Compact));
 }
 
-void WsClient::sendCallAccept(const QString &toId, const QString &roomName)
+void WsClient::sendCallAccept(const QString &toId)
 {
     if (!m_connected) return;
     QJsonObject data;
-    data["toId"]     = toId;
-    data["fromId"]   = m_staffId;
-    data["roomName"] = roomName;
+    data["toId"]   = toId;
+    data["fromId"] = m_staffId;
     QJsonObject env;
     env["type"] = QStringLiteral("call_accept");
     env["data"] = data;
@@ -469,13 +468,12 @@ void WsClient::sendCallReject(const QString &toId)
     m_ws.sendTextMessage(QJsonDocument(env).toJson(QJsonDocument::Compact));
 }
 
-void WsClient::sendCallEnd(const QString &toId, const QString &roomName)
+void WsClient::sendCallEnd(const QString &toId)
 {
     if (!m_connected) return;
     QJsonObject data;
-    data["toId"]     = toId;
-    data["fromId"]   = m_staffId;
-    data["roomName"] = roomName;
+    data["toId"]   = toId;
+    data["fromId"] = m_staffId;
     QJsonObject env;
     env["type"] = QStringLiteral("call_end");
     env["data"] = data;

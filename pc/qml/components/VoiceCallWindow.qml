@@ -1,24 +1,23 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtWebEngine
 import ImAgentHub
 
-// VoiceCallWindow — pure-QML UI, hidden WebEngineView for LiveKit audio only
+// VoiceCallWindow — pure-QML UI, uses AudioCallEngine for native PCM audio
 // Phase lifecycle: idle -> outgoing/incoming -> active -> idle
 Item {
     id: root
 
     // ── Public API (used by ChatPage.qml) ─────────────────────────────
-    property string phase:        "idle"    // idle | incoming | outgoing | active
-    property string peerId:       ""
-    property string peerName:     ""
-    property string roomName:     ""
-    property string livekitToken: ""
-    property string livekitWsUrl: ""
-    property string myId:         ""
-    property string myName:       ""
-    property string statusMsg:    ""        // shown in popup before auto-close
+    property string phase:       "idle"    // idle | incoming | outgoing | active
+    property string peerId:      ""
+    property string peerName:    ""
+    property string roomId:      ""
+    property string audioToken:  ""
+    property string audioWsBase: ""
+    property string myId:        ""
+    property string myName:      ""
+    property string statusMsg:   ""        // shown in popup before auto-close
 
     signal callEnded()
     signal callAccepted()
@@ -29,6 +28,12 @@ Item {
     property bool   _speaking: false
     property int    _secs:     0
     property string _timerStr: "00:00"
+
+    // AudioCallEngine 对端说话状态
+    Connections {
+        target: AudioCallEngine
+        function onPeerSpeaking(speaking) { root._speaking = speaking }
+    }
 
     // ── Timers ────────────────────────────────────────────────────────
 
@@ -335,71 +340,11 @@ Item {
         }
     }
 
-    // ── Hidden audio engine (WebEngineView, 2x2 off-screen) ────────────
-
-    WebEngineView {
-        id: callWebView
-        // Must be inside the window (non-negative position, valid size) so
-        // Chromium does NOT treat this as an off-screen renderer and mute audio.
-        // enabled:false prevents it from consuming mouse events.
-        x: 0; y: 0; width: 4; height: 4
-        enabled: false
-        settings.localContentCanAccessRemoteUrls: true
-        settings.localContentCanAccessFileUrls:  true
-        // Allow media elements to autoplay without a prior user gesture
-        settings.playbackRequiresUserGesture: false
-
-        onFeaturePermissionRequested: function(securityOrigin, feature) {
-            if (feature === WebEngineView.MediaAudioCapture)
-                grantFeaturePermission(securityOrigin, feature, true)
-        }
-
-        // JS reports events as console.log("call:cmd:data")
-        onJavaScriptConsoleMessage: function(level, message, lineNumber, sourceID) {
-            if (message.startsWith("call:")) {
-                var rest  = message.substring(5)
-                var colon = rest.indexOf(':')
-                var cmd   = colon >= 0 ? rest.substring(0, colon) : rest
-                var data  = colon >= 0 ? rest.substring(colon + 1) : ""
-                root._onCallEvent(cmd, data)
-            } else {
-                console.log("[LiveKitAudio]", message)
-            }
-        }
-
-        onLoadingChanged: function(lr) {
-            if (lr.status === WebEngineView.LoadFailedStatus)
-                console.log("[VoiceCall] audio bridge load failed:", lr.errorString)
-            // After page loads, trigger startAudio via runJavaScript.
-            // This runs in the renderer context and can resume AudioContext
-            // even without a real user gesture (works with --autoplay-policy=no-user-gesture-required).
-            if (lr.status === WebEngineView.LoadSucceededStatus) {
-                callWebView.runJavaScript(
-                    "if(window.__room){" +
-                    "  window.__room.startAudio()" +
-                    "    .then(function(){console.log('call:audioCtx:running-js')})" +
-                    "    .catch(function(e){console.log('call:audioCtx:err:' + (e&&e.message||'?'))});" +
-                    "}")
-            }
-        }
-    }
-
     // ── Methods ───────────────────────────────────────────────────────
-
-    function _onCallEvent(cmd, data) {
-        if      (cmd === "connected")    { console.log("[VoiceCall] connected") }
-        else if (cmd === "disconnected") { console.log("[VoiceCall] disconnected reason:", data); root.callEnded() }
-        else if (cmd === "reconnecting") { console.log("[VoiceCall] reconnecting...") }
-        else if (cmd === "reconnected")  { console.log("[VoiceCall] reconnected") }
-        else if (cmd === "speaking")     { root._speaking = (data === "1") }
-        else if (cmd === "audio")        { console.log("[VoiceCall] audio:", data) }
-        else if (cmd === "error")        { console.log("[VoiceCall] JS error:", data) }
-    }
 
     function _toggleMute() {
         _muted = !_muted
-        callWebView.runJavaScript(
-            "window.setMicMuted && window.setMicMuted(" + _muted + ")")
+        AudioCallEngine.setMuted(_muted)
     }
 
     function startActiveCall() {
@@ -407,29 +352,7 @@ Item {
         _timerStr = "00:00"
         _muted    = false
         _speaking = false
-
-        var token     = livekitToken
-        var realWsUrl = livekitWsUrl
-        var peer      = peerName
-        var myid      = myId
-
-        var xhr = new XMLHttpRequest()
-        xhr.onreadystatechange = function() {
-            if (xhr.readyState !== XMLHttpRequest.DONE) return
-            var html = xhr.responseText
-            var baseUrl = HttpClient.baseUrl
-            if (!baseUrl.endsWith('/')) baseUrl = baseUrl + '/'
-            var inj  = '<script>window.__callToken=' + JSON.stringify(token)
-                + ';window.__callWsUrl=' + JSON.stringify(realWsUrl)
-                + ';window.__callPeer='  + JSON.stringify(peer)
-                + ';window.__callMyId='  + JSON.stringify(myid)
-                + ';window.__livekitSrc=' + JSON.stringify('/lk.js')
-                + ';<\/script>'
-            html = html.replace('<head>', '<head>' + inj)
-            callWebView.loadHtml(html, baseUrl)
-        }
-        xhr.open('GET', 'qrc:/ImAgentHub/resources/call.html')
-        xhr.send()
+        AudioCallEngine.start(audioWsBase, HttpClient.baseUrl, roomId, audioToken)
         phase = "active"
     }
 
@@ -437,19 +360,16 @@ Item {
         autoCloseTimer.stop()
         outgoingTimeoutTimer.stop()
         durationTimer.stop()
-        WxBridge.stopLivekitProxy()
-        callWebView.runJavaScript(
-            "if(window.__room){window.__room.disconnect();window.__room=null;}")
-        callWebView.url = "about:blank"
+        AudioCallEngine.stop()
         phase     = "idle"
         statusMsg = ""
         _secs     = 0
         _timerStr = "00:00"
         _muted    = false
         _speaking = false
-        peerId     = ""
-        peerName   = ""
-        roomName   = ""
-        livekitToken = ""
+        peerId      = ""
+        peerName    = ""
+        roomId      = ""
+        audioToken  = ""
     }
 }

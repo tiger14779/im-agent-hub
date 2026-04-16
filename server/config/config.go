@@ -10,17 +10,23 @@ import (
 )
 
 type Config struct {
-	Server   ServerConfig   `mapstructure:"server"`
-	Admin    AdminConfig    `mapstructure:"admin"`
-	Cleanup  CleanupConfig  `mapstructure:"cleanup"`
-	Database DatabaseConfig `mapstructure:"database"`
-	LiveKit  LiveKitConfig  `mapstructure:"livekit"`
+	Server     ServerConfig     `mapstructure:"server"`
+	Admin      AdminConfig      `mapstructure:"admin"`
+	Cleanup    CleanupConfig    `mapstructure:"cleanup"`
+	Database   DatabaseConfig   `mapstructure:"database"`
+	VoiceRelay VoiceRelayConfig `mapstructure:"voice_relay"`
 }
 
-type LiveKitConfig struct {
-	WsURL     string `mapstructure:"ws_url"`     // e.g. wss://livekit.mckao.xyz:7880
-	APIKey    string `mapstructure:"api_key"`
-	APISecret string `mapstructure:"api_secret"`
+// VoiceRelayConfig configures the WebSocket audio relay endpoint.
+// All servers share the same HMAC secret to generate/validate short-lived
+// audio tokens without inter-server API calls.
+type VoiceRelayConfig struct {
+	// Secret is the HMAC-SHA256 key shared across all servers.
+	Secret string `mapstructure:"secret"`
+	// RelayWsUrl is the audio relay WebSocket base URL.
+	// Empty string means "use this server itself" (constructed from request Host).
+	// Other servers set this to wss://jp.your-domain.com/api/call/audio
+	RelayWsUrl string `mapstructure:"relay_ws_url"`
 }
 
 type ServerConfig struct {

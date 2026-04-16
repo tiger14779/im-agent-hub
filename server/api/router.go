@@ -41,25 +41,14 @@ func SetupRouter(
 	// Client WebSocket
 	r.GET("/api/ws", chatHub.HandleClientWS)
 
-	// Client LiveKit token (called when accepting an incoming call)
-	r.POST("/api/livekit/token", ClientLiveKitToken())
+	// WebSocket audio relay — handles PCM audio forwarding between PC and H5
+	r.GET("/api/call/audio", HandleAudioWS)
 
 	// Service staff auth
 	r.POST("/api/service/auth/login", ServiceLogin())
 
 	// Admin auth (no JWT required)
 	r.POST("/api/admin/auth/login", AdminLogin())
-
-	// Serve livekit-client ESM bundle locally (avoids CDN blocks in China).
-	// Uses the true ESM build (has export{Room,RoomEvent,...}) from node_modules.
-	// The Vite chunk in static/h5/assets/ is an internal split chunk without
-	// top-level exports and cannot be used via import().
-	r.GET("/lk.js", func(c *gin.Context) {
-		c.Header("Content-Type", "application/javascript; charset=utf-8")
-		c.Header("Cache-Control", "max-age=3600")
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.File("./static/livekit-client.esm.mjs")
-	})
 
 	// File upload/download (local storage, bypasses unresolvable MinIO hostname)
 	r.POST("/api/upload", UploadFile())
@@ -87,9 +76,6 @@ func SetupRouter(
 		svc.DELETE("/groups/:id", ServiceDissolveGroup(chatHub))
 		svc.POST("/groups/:id/members", ServiceInviteToGroup(chatHub))
 		svc.DELETE("/groups/:id/members/:userId", ServiceKickFromGroup(chatHub))
-
-		// Staff LiveKit token (called when initiating a call)
-		svc.POST("/livekit/token", ServiceLiveKitToken())
 	}
 
 	// Admin routes (JWT + admin role required)

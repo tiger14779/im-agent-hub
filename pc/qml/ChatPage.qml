@@ -600,8 +600,8 @@ Page {
                                     voiceCallWindow.myId     = staffUserId
                                     voiceCallWindow.myName   = staffNickname
                                     voiceCallWindow.phase    = "outgoing"
-                                    // 向后端申请 LiveKit token
-                                    HttpClient.getLiveKitToken(activeChatId)
+                                    // 直接发起邀请，无需事先拿 token（token 由服务端下发）
+                                    WsClient.sendCallInvite(activeChatId, staffNickname)
                                 }
                             }
                             ToolTip.visible: callBtn.containsMouse
@@ -710,13 +710,9 @@ Page {
         anchors.fill: parent
         z: 100
 
-        // 来电：客服点击接听 → 申请 token → token 成功后再发 call_accept + 开始通话
+        // 来电：客服点击接听 → 发 call_accept 到服务端，等待 call_audio_ready 后开始通话
         onCallAccepted: {
-            console.log("[LiveKit] 接听按钮: peerId=", voiceCallWindow.peerId,
-                        "roomName=", voiceCallWindow.roomName,
-                        "phase=", voiceCallWindow.phase)
-            // 先取到 token 再发 accept，防止 token 失败后还向对方发了 accept
-            HttpClient.getLiveKitToken(voiceCallWindow.peerId, voiceCallWindow.roomName)
+            WsClient.sendCallAccept(voiceCallWindow.peerId)
         }
 
         // 来电：客服拒绝
@@ -725,45 +721,9 @@ Page {
             voiceCallWindow.reset()
         }
 
-        // 通话结束（己方挂断 或 HTML页面触发）
+        // 通话结束（己方挂断）
         onCallEnded: {
-            WsClient.sendCallEnd(voiceCallWindow.peerId, voiceCallWindow.roomName)
-            voiceCallWindow.reset()
-        }
-    }
-
-    // LiveKit token 申请回调
-    Connections {
-        target: HttpClient
-
-        function onLiveKitTokenReady(token, roomName, wsUrl) {
-            console.log("[LiveKit] onLiveKitTokenReady phase=", voiceCallWindow.phase,
-                        "tokenLen=", token.length, "room=", roomName)
-            if (voiceCallWindow.phase === "outgoing") {
-                // 主叫：token 回来后保存自己的凭证，发出 invite，等待对方接听
-                voiceCallWindow.livekitToken = token
-                voiceCallWindow.livekitWsUrl = wsUrl
-                voiceCallWindow.roomName     = roomName
-                WsClient.sendCallInvite(
-                    voiceCallWindow.peerId,
-                    roomName,
-                    wsUrl,
-                    staffNickname
-                )
-            } else if (voiceCallWindow.phase === "incoming") {
-                // 被叫：token 拿到后先发 accept，再开始通话
-                voiceCallWindow.livekitToken = token
-                voiceCallWindow.livekitWsUrl = wsUrl
-                WsClient.sendCallAccept(voiceCallWindow.peerId, voiceCallWindow.roomName)
-                voiceCallWindow.startActiveCall()
-            } else {
-                console.log("[LiveKit] onLiveKitTokenReady 未匹配任何分支, phase=", voiceCallWindow.phase)
-            }
-        }
-
-        function onLiveKitTokenError(error) {
-            console.warn("[VoiceCall] token error:", error)
-            WsClient.sendCallReject(voiceCallWindow.peerId)
+            WsClient.sendCallEnd(voiceCallWindow.peerId)
             voiceCallWindow.reset()
         }
     }
@@ -772,49 +732,44 @@ Page {
     Connections {
         target: WsClient
 
-        function onCallInviteReceived(fromId, fromName, roomName, livekitUrl) {
+        function onCallInviteReceived(fromId, fromName) {
             if (voiceCallWindow.phase !== "idle") {
-                // 已在通话中，自动拒绝
+                // 已在通话中，自动回复忙线
                 WsClient.sendCallReject(fromId)
                 return
             }
-            voiceCallWindow.peerId       = fromId
-            voiceCallWindow.peerName     = fromName || fromId
-            voiceCallWindow.roomName     = roomName
-            voiceCallWindow.livekitWsUrl = livekitUrl
-            voiceCallWindow.myId         = staffUserId
-            voiceCallWindow.myName       = staffNickname
-            voiceCallWindow.phase        = "incoming"
+            voiceCallWindow.peerId   = fromId
+            voiceCallWindow.peerName = fromName || fromId
+            voiceCallWindow.myId     = staffUserId
+            voiceCallWindow.myName   = staffNickname
+            voiceCallWindow.phase    = "incoming"
         }
 
-        function onCallAccepted(fromId, roomName) {
-            console.log("[LiveKit] WsClient.onCallAccepted fromId=", fromId,
-                        "peerId=", voiceCallWindow.peerId,
-                        "phase=", voiceCallWindow.phase,
-                        "tokenLen=", voiceCallWindow.livekitToken.length)
-            if (voiceCallWindow.phase === "outgoing" && voiceCallWindow.peerId === fromId) {
-                // 对方接听：主叫的 token 已在 onLiveKitTokenReady 里赋好，直接进入通话
-                if (voiceCallWindow.livekitToken !== "") {
-                    voiceCallWindow.startActiveCall()
-                } else {
-                    console.log("[LiveKit] call_accept 到达但 token 为空！等待 onLiveKitTokenReady")
-                }
-            } else {
-                console.log("[LiveKit] call_accept 条件不匹配: phase=", voiceCallWindow.phase,
-                            "peerId匹配=", voiceCallWindow.peerId === fromId)
+        function onCallAccepted(fromId) {
+            // 对方接听，等 call_audio_ready 触发 startActiveCall
+            console.log("[AudioCall] call_accept from=", fromId, "phase=", voiceCallWindow.phase)
+        }
+
+        function onCallAudioReady(roomId, token, wsBase) {
+            console.log("[AudioCall] call_audio_ready room=", roomId, "phase=", voiceCallWindow.phase)
+            if (voiceCallWindow.phase === "outgoing" || voiceCallWindow.phase === "incoming") {
+                voiceCallWindow.roomId      = roomId
+                voiceCallWindow.audioToken  = token
+                voiceCallWindow.audioWsBase = wsBase
+                voiceCallWindow.startActiveCall()
             }
         }
 
         function onCallRejected(fromId) {
             if (voiceCallWindow.peerId === fromId) {
-                voiceCallWindow.statusMsg = "\u5bf9\u65b9\u62d2\u7edd\u63a5\u542c"
+                voiceCallWindow.statusMsg = "对方拒绝接听"
                 voiceCallWindow.autoCloseTimer.start()
             }
         }
 
         function onCallBusy(fromId) {
             if (voiceCallWindow.peerId === fromId) {
-                voiceCallWindow.statusMsg = "\u5bf9\u65b9\u5fd9\u7ebf\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5"
+                voiceCallWindow.statusMsg = "对方忙线，请稍后再试"
                 voiceCallWindow.autoCloseTimer.start()
             }
         }

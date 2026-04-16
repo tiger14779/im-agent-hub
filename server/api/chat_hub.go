@@ -295,8 +295,11 @@ func (h *ChatHub) readLoop(cc *ChatConn) {
 		case "query_online":
 			h.handleQueryOnline(cc)
 		// ── 通话信令中继 ──────────────────────────────────────────────
-		case "call_invite", "call_accept", "call_reject", "call_end", "call_busy":
+		case "call_invite", "call_reject", "call_end", "call_busy":
 			h.relayCallSignal(cc, env.Type, env.Data)
+		case "call_accept":
+			// Relay the accept AND generate audio relay credentials for both parties.
+			h.handleCallAccept(cc, env.Data)
 		}
 	}
 }
@@ -315,6 +318,52 @@ func (h *ChatHub) relayCallSignal(cc *ChatConn, msgType string, data json.RawMes
 	h.sendToUser(req.ToID, map[string]interface{}{
 		"type": msgType,
 		"data": json.RawMessage(data),
+	})
+}
+
+// handleCallAccept relays call_accept and sends call_audio_ready with room credentials to both parties.
+func (h *ChatHub) handleCallAccept(cc *ChatConn, data json.RawMessage) {
+	var req struct {
+		ToID   string `json:"toId"`
+		FromID string `json:"fromId"`
+	}
+	if err := json.Unmarshal(data, &req); err != nil || req.ToID == "" {
+		log.Printf("[WS] call_accept invalid from %s: missing toId", cc.userID)
+		return
+	}
+	log.Printf("[WS] call_accept: %s → %s", cc.userID, req.ToID)
+
+	// 1. Relay the accept signal to the caller
+	h.sendToUser(req.ToID, map[string]interface{}{
+		"type": "call_accept",
+		"data": json.RawMessage(data),
+	})
+
+	// 2. Generate room credentials (roomId + per-party HMAC tokens)
+	roomID := GenerateRoomID()
+	tokenCaller := GenerateAudioToken(roomID, req.ToID)  // for the caller
+	tokenCallee := GenerateAudioToken(roomID, cc.userID) // for the callee (current conn)
+
+	// 3. Determine relay base URL from config (empty = self-relay, client uses own host)
+	wilBase := buildAudioWsUrlFromConfig()
+
+	// 4. Send call_audio_ready to both parties
+	// wsBase is empty when relay_ws_url is not configured; clients fall back to own server.
+	h.sendToUser(req.ToID, map[string]interface{}{
+		"type": "call_audio_ready",
+		"data": map[string]interface{}{
+			"roomId": roomID,
+			"token":  tokenCaller,
+			"wsBase": wilBase,
+		},
+	})
+	h.sendJSON(cc, map[string]interface{}{
+		"type": "call_audio_ready",
+		"data": map[string]interface{}{
+			"roomId": roomID,
+			"token":  tokenCallee,
+			"wsBase": wilBase,
+		},
 	})
 }
 

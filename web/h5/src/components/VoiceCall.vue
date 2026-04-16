@@ -59,32 +59,30 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onUnmounted } from 'vue'
-import { chatWs, type CallInviteData, type CallSignalData } from '@/services/ws'
-import request from '@/utils/request'
+import { ref, computed, onUnmounted } from 'vue'
+import { chatWs, type CallInviteData, type CallSignalData, type CallAudioReadyData } from '@/services/ws'
 
 type CallPhase = 'idle' | 'incoming' | 'outgoing' | 'active'
 
 const props = defineProps<{
   myUserId: string
-  myToken: string  // 后端登录 token（用于获取 LiveKit token）
 }>()
 
 const phase = ref<CallPhase>('idle')
 const callerName = ref('')
 const callFromId = ref('') // 来电方 id
 const callToId = ref('')   // 呼出方 id
-const roomName = ref('')
-const livekitUrl = ref('')
-const livekitToken = ref('') // 呼出时提前获取的 token
 const muted = ref(false)
 const isSpeaking = ref(false)
 const duration = ref(0) // 通话秒数
 
 let durationTimer: ReturnType<typeof setInterval> | null = null
-let lkRoom: any = null // LiveKit Room 实例（动态导入）
-let incomingTimer: ReturnType<typeof setTimeout> | null = null // 来电超时自动拒绝
-let outgoingTimer: ReturnType<typeof setTimeout> | null = null  // 呼出超时（30s 无人接听）
+let audioCtx: AudioContext | null = null
+let audioWs: WebSocket | null = null
+let captureStream: MediaStream | null = null
+let gainNode: GainNode | null = null
+let incomingTimer: ReturnType<typeof setTimeout> | null = null
+let outgoingTimer: ReturnType<typeof setTimeout> | null = null
 
 // ── 格式化通话时长 ─────────────────────────────────────────────────
 const formattedDuration = computed(() => {
@@ -93,17 +91,82 @@ const formattedDuration = computed(() => {
   return `${m}:${s}`
 })
 
+// ── WebSocket PCM 音频中继 ──────────────────────────────────────────
+async function connectAudioWs(wsBase: string, roomId: string, token: string) {
+  try {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const base = wsBase || `${proto}//${location.host}/api/call/audio`
+    const url = `${base}?roomId=${encodeURIComponent(roomId)}&token=${encodeURIComponent(token)}`
+
+    audioWs = new WebSocket(url)
+    audioWs.binaryType = 'arraybuffer'
+
+    audioCtx = new AudioContext({ sampleRate: 8000 })
+
+    // 麦克风采集
+    captureStream = await navigator.mediaDevices.getUserMedia({
+      audio: { sampleRate: { ideal: 8000 }, channelCount: 1 }
+    })
+    const source = audioCtx.createMediaStreamSource(captureStream)
+    gainNode = audioCtx.createGain()
+    gainNode.gain.value = muted.value ? 0 : 1
+
+    // ScriptProcessorNode: float32 → int16 → WebSocket
+    const scriptNode = audioCtx.createScriptProcessor(1024, 1, 1)
+    scriptNode.onaudioprocess = (e) => {
+      if (!audioWs || audioWs.readyState !== WebSocket.OPEN) return
+      const float32 = e.inputBuffer.getChannelData(0)
+      const int16 = new Int16Array(float32.length)
+      for (let i = 0; i < float32.length; i++) {
+        int16[i] = Math.max(-32768, Math.min(32767, Math.round(float32[i] * 32767)))
+      }
+      audioWs.send(int16.buffer)
+    }
+    source.connect(gainNode)
+    gainNode.connect(scriptNode)
+    scriptNode.connect(audioCtx.destination) // Chrome 要求连到 destination 才处理
+
+    // 接收对端音频：int16 → float32 → AudioBufferSourceNode
+    audioWs.onmessage = (ev) => {
+      if (!audioCtx || !(ev.data instanceof ArrayBuffer)) return
+      const int16 = new Int16Array(ev.data)
+      const float32 = new Float32Array(int16.length)
+      let sumSq = 0
+      for (let i = 0; i < int16.length; i++) {
+        float32[i] = int16[i] / 32768
+        sumSq += float32[i] * float32[i]
+      }
+      isSpeaking.value = Math.sqrt(sumSq / int16.length) > 0.015
+
+      const buf = audioCtx.createBuffer(1, float32.length, 8000)
+      buf.getChannelData(0).set(float32)
+      const player = audioCtx.createBufferSource()
+      player.buffer = buf
+      player.connect(audioCtx.destination)
+      player.start()
+    }
+
+    audioWs.onclose = () => {
+      if (phase.value === 'active') endCall()
+    }
+    audioWs.onerror = () => {
+      console.error('[VoiceCall] audio WS error')
+      endCall()
+    }
+  } catch (e) {
+    console.error('[VoiceCall] connectAudioWs failed', e)
+    endCall()
+  }
+}
+
 // ── 注册 WS 信令回调 ───────────────────────────────────────────────
 chatWs.onCallInvite = (data: CallInviteData) => {
   if (phase.value !== 'idle') {
-    // 已有通话，起忙线信号
     chatWs.sendCallBusy(data.fromId)
     return
   }
   callerName.value = data.fromName || data.fromId
   callFromId.value = data.fromId
-  roomName.value = data.roomName
-  livekitUrl.value = data.livekitUrl
   phase.value = 'incoming'
   // 30 秒无操作自动拒绝
   incomingTimer = setTimeout(() => {
@@ -122,47 +185,31 @@ chatWs.onCallReject = (_data: CallSignalData) => {
   endCall()
 }
 
-// 对方接听（呼出时使用）
-chatWs.onCallAccept = async (_data: CallSignalData) => {
-  if (phase.value !== 'outgoing') return
-  clearOutgoingTimer()
-  try {
-    phase.value = 'active'
-    startDurationTimer()
-    await joinLiveKit(livekitToken.value, livekitUrl.value)
-  } catch (e) {
-    console.error('[VoiceCall] outgoing accept join failed', e)
-    endCall()
-  }
-}
-
-// 对方忙线（呼出时使用）
 chatWs.onCallBusy = (_data: CallSignalData) => {
   if (phase.value !== 'outgoing') return
   clearOutgoingTimer()
   endCall()
 }
 
+// 服务端下发音频中继凭证（主叫和被叫都会收到）
+chatWs.onCallAudioReady = (data: CallAudioReadyData) => {
+  if (phase.value !== 'outgoing' && phase.value !== 'incoming') return
+  phase.value = 'active'
+  startDurationTimer()
+  connectAudioWs(data.wsBase, data.roomId, data.token)
+}
+
+// 对方接听（呼出时服务端会同时下发 call_accept + call_audio_ready）
+chatWs.onCallAccept = (_data: CallSignalData) => {
+  // call_audio_ready 会触发真正的启动；此处仅做日志
+  console.log('[VoiceCall] call_accept received, waiting for call_audio_ready')
+}
+
 // ── 接听 ──────────────────────────────────────────────────────────
-async function onAccept() {
-  try {
-    // 1. 向后端获取 LiveKit token
-    const res = await request.post<unknown, { token: string; wsUrl: string }>(
-      `/livekit/token?userId=${encodeURIComponent(props.myUserId)}`,
-      { roomName: roomName.value }
-    )
-
-    // 2. 通知客服已接听
-    chatWs.sendCallAccept(callFromId.value, roomName.value)
-
-    // 3. 连接 LiveKit
-    phase.value = 'active'
-    startDurationTimer()
-    await joinLiveKit(res.token, res.wsUrl)
-  } catch (e) {
-    console.error('[VoiceCall] accept failed', e)
-    endCall()
-  }
+function onAccept() {
+  if (incomingTimer) { clearTimeout(incomingTimer); incomingTimer = null }
+  // 发送 call_accept 到服务端，服务端下发 call_audio_ready 后启动音频
+  chatWs.sendCallAccept(callFromId.value)
 }
 
 // ── 拒绝 ──────────────────────────────────────────────────────────
@@ -170,73 +217,32 @@ function onReject() {
   chatWs.sendCallReject(callFromId.value)
   endCall()
 }
-// 取消呼出 ─────────────────────────────────────────────────────────────
+
+// 取消呼出
 function onCancel() {
-  chatWs.sendCallEnd(callToId.value, roomName.value)
+  chatWs.sendCallEnd(callToId.value)
   endCall()
 }
+
 // ── 挂断 ──────────────────────────────────────────────────────────
 function onHangup() {
-  // callFromId: 来电方ID（被叫时设置）；callToId: 呼出对象ID（主叫时设置）
   const peerId = callFromId.value || callToId.value
-  chatWs.sendCallEnd(peerId, roomName.value)
+  chatWs.sendCallEnd(peerId)
   endCall()
 }
 
 // ── 静音切换 ──────────────────────────────────────────────────────
-async function toggleMute() {
+function toggleMute() {
   muted.value = !muted.value
-  if (lkRoom) {
-    try {
-      await lkRoom.localParticipant.setMicrophoneEnabled(!muted.value)
-    } catch { /* ignore */ }
-  }
-}
-
-// ── LiveKit 连接 ──────────────────────────────────────────────────
-async function joinLiveKit(token: string, wsUrl: string) {
-  try {
-    // 动态导入 livekit-client，避免首包体积过大
-    const { Room, RoomEvent } = await import('livekit-client')
-    lkRoom = new Room({ audioCaptureDefaults: { echoCancellation: true, noiseSuppression: true } })
-
-    lkRoom.on(RoomEvent.Disconnected, () => { endCall() })
-    lkRoom.on(RoomEvent.ActiveSpeakersChanged, (speakers: any[]) => {
-      isSpeaking.value = speakers.some((s: any) => s.identity !== props.myUserId)
-    })
-
-    // Attach incoming audio tracks so remote audio actually plays
-    lkRoom.on(RoomEvent.TrackSubscribed, (track: any) => {
-      if (track.kind === 'audio') {
-        const el = track.attach() as HTMLAudioElement
-        el.autoplay = true
-        document.body.appendChild(el)
-        // Resume AudioContext if suspended (required on mobile/some browsers)
-        lkRoom.startAudio().catch(() => {})
-      }
-    })
-    lkRoom.on(RoomEvent.TrackUnsubscribed, (track: any) => {
-      track.detach()
-    })
-    // Retry AudioContext resume if it gets suspended after playback starts
-    lkRoom.on(RoomEvent.AudioPlaybackStatusChanged, () => {
-      if (!lkRoom.canPlaybackAudio) lkRoom.startAudio().catch(() => {})
-    })
-
-    await lkRoom.connect(wsUrl, token)
-    await lkRoom.localParticipant.setMicrophoneEnabled(true)
-  } catch (e) {
-    console.error('[VoiceCall] LiveKit connect error', e)
-    endCall()
-  }
+  if (gainNode) gainNode.gain.value = muted.value ? 0 : 1
 }
 
 // ── 结束通话清理 ──────────────────────────────────────────────────
 function endCall() {
-  if (lkRoom) {
-    lkRoom.disconnect()
-    lkRoom = null
-  }
+  if (audioWs) { audioWs.onclose = null; audioWs.close(); audioWs = null }
+  if (captureStream) { captureStream.getTracks().forEach(t => t.stop()); captureStream = null }
+  if (audioCtx) { audioCtx.close(); audioCtx = null }
+  gainNode = null
   if (incomingTimer) { clearTimeout(incomingTimer); incomingTimer = null }
   clearOutgoingTimer()
   stopDurationTimer()
@@ -247,23 +253,20 @@ function endCall() {
   callerName.value = ''
   callFromId.value = ''
   callToId.value = ''
-  roomName.value = ''
-  livekitToken.value = ''
 }
 
-// 呼出接口（客服工作台主叫时调用）──────────────────────────────────
-function beginOutgoing(peerId: string, peerName: string, token: string, room: string, wsUrl: string) {
+// 呼出接口（H5 用户主动发起语音通话时调用）
+function beginOutgoing(peerId: string, peerName: string) {
   callToId.value = peerId
   callerName.value = peerName
-  livekitToken.value = token
-  roomName.value = room
-  livekitUrl.value = wsUrl
   phase.value = 'outgoing'
-  // 30秒无人接听自动取消
+  // 发出邀请
+  chatWs.sendCallInvite(peerId, props.myUserId)
+  // 30 秒无人接听自动取消
   clearOutgoingTimer()
   outgoingTimer = setTimeout(() => {
     if (phase.value === 'outgoing') {
-      chatWs.sendCallEnd(callToId.value, roomName.value)
+      chatWs.sendCallEnd(callToId.value)
       endCall()
     }
   }, 30000)

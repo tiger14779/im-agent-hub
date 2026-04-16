@@ -13,7 +13,6 @@ find_package(Qt6 6.7 REQUIRED COMPONENTS
     WebSockets
     Multimedia
     Sql
-    WebEngineQuick
 )
 
 qt_standard_project_setup(REQUIRES 6.7)
@@ -26,6 +25,7 @@ set(SOURCES
     src/network/httpclient.cpp
     src/network/wsclient.cpp
     src/network/wxbridge.cpp
+    src/network/audiocallengine.cpp
     src/database/messagecache.cpp
 )
 
@@ -35,6 +35,7 @@ set(HEADERS
     src/network/httpclient.h
     src/network/wsclient.h
     src/network/wxbridge.h
+    src/network/audiocallengine.h
     src/database/messagecache.h
 )
 
@@ -69,7 +70,6 @@ qt_add_qml_module(${PROJECT_NAME}
     QML_FILES ${QML_FILES}
     RESOURCES
         resources/notify.wav
-        resources/call.html
     RESOURCE_PREFIX /
 )
 
@@ -80,7 +80,6 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt6::WebSockets
     Qt6::Multimedia
     Qt6::Sql
-    Qt6::WebEngineQuick
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE

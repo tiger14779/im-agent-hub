@@ -18,7 +18,6 @@ cleanup:
   retention_days: 45
   cron: "0 3 * * *"
 
-livekit:
-  ws_url: "wss://livekit.mckao.xyz"
-  api_key: "livekit_key_7c1bd167de88d7f1"
-  api_secret: "Me8CEwNeps1HrDKqU8svWiVfK0mddI4vk5dPvzm2OnU"
+voice_relay:
+  secret: "im-agent-hub-voice-relay-secret-change-me"
+  relay_ws_url: ""  # empty = self (use incoming request Host); set to wss://jp.domain.com/api/call/audio on non-JP servers

@@ -16,7 +16,6 @@
 #include <QNetworkAccessManager>
 #include <QNetworkDiskCache>
 #include <QStandardPaths>
-#include <QtWebEngineQuick/QtWebEngineQuick>
 
 // 全局日志文件，将 qDebug 输出重定向到文件
 static QFile *g_logFile = nullptr;
@@ -92,21 +91,6 @@ static void raiseAllWindows()
 
 int main(int argc, char *argv[])
 {
-    // 允许 QML XMLHttpRequest 读取 qrc:// 资源（call.html 通过 XHR 读取后用 loadHtml 加载）
-    qputenv("QML_XHR_ALLOW_FILE_READ", "1");
-
-    // 允许 qrc:// 页面访问外部网络（LiveKit WebSocket/媒体流）
-    // disable-web-security 是嵌入式 WebView 场景的标准做法
-    qputenv("QTWEBENGINE_CHROMIUM_FLAGS",
-            "--disable-web-security "
-            "--allow-running-insecure-content "
-            "--ignore-certificate-errors "
-            "--autoplay-policy=no-user-gesture-required "
-            "--disable-features=IsolateOrigins,site-per-process");
-
-    // WebEngineQuick 必须在 QGuiApplication 创建前初始化
-    QtWebEngineQuick::initialize();
-
     QGuiApplication app(argc, argv);
     app.setApplicationName("IM Agent Hub");
     app.setOrganizationName("ImAgentHub");

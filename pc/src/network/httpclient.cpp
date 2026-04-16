@@ -701,27 +701,6 @@ void HttpClient::startFileDrag(const QString &url, const QString &fileName)
     });
 }
 
-void HttpClient::getLiveKitToken(const QString &peerId, const QString &roomName)
-{
-    QNetworkRequest req = authedRequest("/api/service/livekit/token");
-    QJsonObject body;
-    body["peerId"] = peerId;
-    if (!roomName.isEmpty()) {
-        body["roomName"] = roomName;  // 接受时传入已有房间，避免后端重新生成
-    }
-    QNetworkReply *reply = m_nam.post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
-    handleReply(reply,
-        [this](const QJsonObject &resp) {
-            QJsonObject d = resp["data"].toObject();
-            emit liveKitTokenReady(
-                d["token"].toString(),
-                d["roomName"].toString(),
-                d["wsUrl"].toString()
-            );
-        },
-        [this](const QString &err) { emit liveKitTokenError(err); });
-}
-
 void HttpClient::performDrag(const QString &localPath)
 {
     auto *window = qobject_cast<QWindow*>(QGuiApplication::focusWindow());

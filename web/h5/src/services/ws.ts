@@ -55,14 +55,17 @@ export interface CallInviteData {
   fromId: string
   fromName: string
   toId: string
-  roomName: string
-  livekitUrl: string
 }
 
 export interface CallSignalData {
   fromId: string
   toId: string
-  roomName?: string
+}
+
+export interface CallAudioReadyData {
+  roomId: string
+  token: string
+  wsBase: string
 }
 
 type Envelope = { type: string; data: unknown }
@@ -113,6 +116,7 @@ class ChatWsService {
   onCallReject: (data: CallSignalData) => void = () => {}
   onCallBusy: (data: CallSignalData) => void = () => {}
   onCallEnd: (data: CallSignalData) => void = () => {}
+  onCallAudioReady: (data: CallAudioReadyData) => void = () => {}
 
   /** Build the WebSocket URL based on current page origin */
   private buildWsUrl(): string {
@@ -268,6 +272,12 @@ class ChatWsService {
         const d = env.data as CallSignalData
         this.onCallEnd(d)
         break
+      }
+      case 'call_audio_ready': {
+        const d = env.data as CallAudioReadyData
+        this.onCallAudioReady(d)
+        break
+      }
       }
       default:
         console.log('[WS] unknown type', env.type)
@@ -490,12 +500,12 @@ class ChatWsService {
   }
 
   // ── 通话信令发送方法 ──────────────────────────────────────────────
-  sendCallInvite(toId: string, roomName: string, livekitUrl: string, fromName: string) {
-    this.send('call_invite', { toId, fromId: this.userId, fromName, roomName, livekitUrl })
+  sendCallInvite(toId: string, fromName: string) {
+    this.send('call_invite', { toId, fromId: this.userId, fromName })
   }
 
-  sendCallAccept(toId: string, roomName: string) {
-    this.send('call_accept', { toId, fromId: this.userId, roomName })
+  sendCallAccept(toId: string) {
+    this.send('call_accept', { toId, fromId: this.userId })
   }
 
   sendCallReject(toId: string) {
@@ -506,8 +516,8 @@ class ChatWsService {
     this.send('call_busy', { toId, fromId: this.userId })
   }
 
-  sendCallEnd(toId: string, roomName: string) {
-    this.send('call_end', { toId, fromId: this.userId, roomName })
+  sendCallEnd(toId: string) {
+    this.send('call_end', { toId, fromId: this.userId })
   }
 
   disconnect() {
