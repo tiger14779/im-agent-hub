@@ -49,6 +49,10 @@
               <span class="call-icon">{{ muted ? '🔇' : '🎤' }}</span>
               <span>{{ muted ? '取消静音' : '静音' }}</span>
             </button>
+            <button class="call-btn speaker" :class="{ active: speakerOn }" @click="toggleSpeaker">
+              <span class="call-icon">{{ speakerOn ? '🔊' : '🔈' }}</span>
+              <span>{{ speakerOn ? '免提' : '听筒' }}</span>
+            </button>
             <button class="call-btn hangup" @click="onHangup">
               <span class="call-icon">📵</span>
               <span>挂断</span>
@@ -100,9 +104,14 @@ let audioCtx: AudioContext | null = null
 let audioWs: WebSocket | null = null
 let captureStream: MediaStream | null = null
 let gainNode: GainNode | null = null
+let playbackGain: GainNode | null = null           // playback volume boost
+let speakerDest: MediaStreamAudioDestinationNode | null = null  // loudspeaker routing
+let speakerAudio: HTMLAudioElement | null = null    // <audio> element for loudspeaker
 let incomingTimer: ReturnType<typeof setTimeout> | null = null
 let outgoingTimer: ReturnType<typeof setTimeout> | null = null
 let playbackCursor = 0 // scheduled playback cursor - keeps frames contiguous, no overlap/gap
+
+const speakerOn = ref(true)  // default: loudspeaker ON
 
 // ── 格式化通话时长 ─────────────────────────────────────────────────
 const formattedDuration = computed(() => {
@@ -170,6 +179,16 @@ async function connectAudioWs(wsBase: string, roomId: string, token: string) {
     scriptNode.connect(audioCtx.destination)
 
     console.log('[VoiceCall] pipeline ready, phase -> active')
+    // 建立播放增益节点（提升音量）+ 免提路由
+    playbackGain = audioCtx.createGain()
+    playbackGain.gain.value = 3.0  // 提升 3倍音量
+    // MediaStreamDestination 路由：让 <audio> 元素接管播放，强制使用底部扬声器
+    speakerDest = audioCtx.createMediaStreamDestination()
+    playbackGain.connect(speakerDest)
+    speakerAudio = new Audio()
+    speakerAudio.srcObject = speakerDest.stream
+    speakerAudio.volume = 1.0
+    speakerAudio.play().catch(() => {})
     playbackCursor = 0
     phase.value = 'active'
     startDurationTimer()
@@ -191,7 +210,12 @@ async function connectAudioWs(wsBase: string, roomId: string, token: string) {
     buf.getChannelData(0).set(float32)
     const player = audioCtx.createBufferSource()
     player.buffer = buf
-    player.connect(audioCtx.destination)
+    // 通过 playbackGain 连接到 speakerDest（免提模式）或直接到 destination（听筒模式）
+    if (playbackGain && speakerDest) {
+      player.connect(playbackGain)
+    } else {
+      player.connect(audioCtx.destination)
+    }
 
     // 调度播放：维护时间游标，让每个帧严格接续，消除报文重叠戚斩断
     const now = audioCtx.currentTime
@@ -310,7 +334,20 @@ function onHangup() {
   chatWs.sendCallEnd(peerId)
   endCall()
 }
-
+// 免提切换
+function toggleSpeaker() {
+  speakerOn.value = !speakerOn.value
+  if (!audioCtx || !playbackGain || !speakerDest) return
+  if (speakerOn.value) {
+    // 免提：通过 <audio> 元素路由，底部扬声器
+    playbackGain.connect(speakerDest)
+    if (speakerAudio) speakerAudio.play().catch(() => {})
+  } else {
+    // 听筒：断开 speakerDest，转回默认耗机 receiver
+    playbackGain.disconnect(speakerDest)
+    if (speakerAudio) speakerAudio.pause()
+  }
+}
 // ── 静音切换 ──────────────────────────────────────────────────────
 function toggleMute() {
   muted.value = !muted.value
@@ -321,8 +358,11 @@ function toggleMute() {
 function endCall() {
   if (audioWs) { audioWs.onclose = null; audioWs.close(); audioWs = null }
   if (captureStream) { captureStream.getTracks().forEach(t => t.stop()); captureStream = null }
+  if (speakerAudio) { speakerAudio.pause(); speakerAudio.srcObject = null; speakerAudio = null }
   if (audioCtx) { audioCtx.close(); audioCtx = null }
   gainNode = null
+  playbackGain = null
+  speakerDest = null
   if (incomingTimer) { clearTimeout(incomingTimer); incomingTimer = null }
   clearOutgoingTimer()
   stopDurationTimer()
