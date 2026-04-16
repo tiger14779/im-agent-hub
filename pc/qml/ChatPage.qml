@@ -710,14 +710,13 @@ Page {
         anchors.fill: parent
         z: 100
 
-        // 来电：客服点击接听 → 申请 token（传入已有 roomName）→ 进入通话
+        // 来电：客服点击接听 → 申请 token → token 成功后再发 call_accept + 开始通话
         onCallAccepted: {
             console.log("[LiveKit] 接听按钮: peerId=", voiceCallWindow.peerId,
                         "roomName=", voiceCallWindow.roomName,
                         "phase=", voiceCallWindow.phase)
+            // 先取到 token 再发 accept，防止 token 失败后还向对方发了 accept
             HttpClient.getLiveKitToken(voiceCallWindow.peerId, voiceCallWindow.roomName)
-            // token 返回后由 liveKitTokenReady 处理
-            WsClient.sendCallAccept(voiceCallWindow.peerId, voiceCallWindow.roomName)
         }
 
         // 来电：客服拒绝
@@ -752,9 +751,10 @@ Page {
                     staffNickname
                 )
             } else if (voiceCallWindow.phase === "incoming") {
-                // 被叫：接听后拿到 token，立即开始通话
+                // 被叫：token 拿到后先发 accept，再开始通话
                 voiceCallWindow.livekitToken = token
                 voiceCallWindow.livekitWsUrl = wsUrl
+                WsClient.sendCallAccept(voiceCallWindow.peerId, voiceCallWindow.roomName)
                 voiceCallWindow.startActiveCall()
             } else {
                 console.log("[LiveKit] onLiveKitTokenReady 未匹配任何分支, phase=", voiceCallWindow.phase)

@@ -84,6 +84,7 @@ const duration = ref(0) // 通话秒数
 let durationTimer: ReturnType<typeof setInterval> | null = null
 let lkRoom: any = null // LiveKit Room 实例（动态导入）
 let incomingTimer: ReturnType<typeof setTimeout> | null = null // 来电超时自动拒绝
+let outgoingTimer: ReturnType<typeof setTimeout> | null = null  // 呼出超时（30s 无人接听）
 
 // ── 格式化通话时长 ─────────────────────────────────────────────────
 const formattedDuration = computed(() => {
@@ -124,6 +125,7 @@ chatWs.onCallReject = (_data: CallSignalData) => {
 // 对方接听（呼出时使用）
 chatWs.onCallAccept = async (_data: CallSignalData) => {
   if (phase.value !== 'outgoing') return
+  clearOutgoingTimer()
   try {
     phase.value = 'active'
     startDurationTimer()
@@ -132,6 +134,13 @@ chatWs.onCallAccept = async (_data: CallSignalData) => {
     console.error('[VoiceCall] outgoing accept join failed', e)
     endCall()
   }
+}
+
+// 对方忙线（呼出时使用）
+chatWs.onCallBusy = (_data: CallSignalData) => {
+  if (phase.value !== 'outgoing') return
+  clearOutgoingTimer()
+  endCall()
 }
 
 // ── 接听 ──────────────────────────────────────────────────────────
@@ -168,7 +177,9 @@ function onCancel() {
 }
 // ── 挂断 ──────────────────────────────────────────────────────────
 function onHangup() {
-  chatWs.sendCallEnd(callFromId.value, roomName.value)
+  // callFromId: 来电方ID（被叫时设置）；callToId: 呼出对象ID（主叫时设置）
+  const peerId = callFromId.value || callToId.value
+  chatWs.sendCallEnd(peerId, roomName.value)
   endCall()
 }
 
@@ -219,7 +230,10 @@ function endCall() {
   if (lkRoom) {
     lkRoom.disconnect()
     lkRoom = null
-  }  if (incomingTimer) { clearTimeout(incomingTimer); incomingTimer = null }  stopDurationTimer()
+  }
+  if (incomingTimer) { clearTimeout(incomingTimer); incomingTimer = null }
+  clearOutgoingTimer()
+  stopDurationTimer()
   phase.value = 'idle'
   muted.value = false
   isSpeaking.value = false
@@ -239,6 +253,14 @@ function beginOutgoing(peerId: string, peerName: string, token: string, room: st
   roomName.value = room
   livekitUrl.value = wsUrl
   phase.value = 'outgoing'
+  // 30秒无人接听自动取消
+  clearOutgoingTimer()
+  outgoingTimer = setTimeout(() => {
+    if (phase.value === 'outgoing') {
+      chatWs.sendCallEnd(callToId.value, roomName.value)
+      endCall()
+    }
+  }, 30000)
 }
 
 defineExpose({ beginOutgoing })
@@ -250,6 +272,10 @@ function startDurationTimer() {
 
 function stopDurationTimer() {
   if (durationTimer) { clearInterval(durationTimer); durationTimer = null }
+}
+
+function clearOutgoingTimer() {
+  if (outgoingTimer) { clearTimeout(outgoingTimer); outgoingTimer = null }
 }
 
 onUnmounted(() => { endCall() })
