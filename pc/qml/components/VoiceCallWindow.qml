@@ -413,10 +413,6 @@ Item {
         var peer      = peerName
         var myid      = myId
 
-        // 直接使用 wss:// 真实地址（--ignore-certificate-errors 可跳过证书验证）
-        // livekit-client@2 在 ICE 建立后会用真实地址重连，代理会被绕过
-        console.log("[VoiceCall] direct wsUrl:", realWsUrl, "tokenLen:", token.length)
-
         var xhr = new XMLHttpRequest()
         xhr.onreadystatechange = function() {
             if (xhr.readyState !== XMLHttpRequest.DONE) return
@@ -431,7 +427,6 @@ Item {
                 + ';<\/script>'
             html = html.replace('<head>', '<head>' + inj)
             callWebView.loadHtml(html, baseUrl)
-            console.log("[VoiceCall] audio bridge loaded")
         }
         xhr.open('GET', 'qrc:/ImAgentHub/resources/call.html')
         xhr.send()

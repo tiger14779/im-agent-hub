@@ -48,11 +48,7 @@ if (!token || !wsUrl) {
     window.__room = room;
 
     function ensureAudio() {
-      room.startAudio().then(function() {
-        report('audioCtx', 'running');
-      }).catch(function(e) {
-        report('audioCtx', 'err:' + (e && e.message ? e.message : 'unknown'));
-      });
+      room.startAudio().catch(function(){});
     }
 
     room.on(RoomEvent.Connected, function() {
@@ -64,10 +60,7 @@ if (!token || !wsUrl) {
     });
 
     room.on(RoomEvent.AudioPlaybackStatusChanged, function() {
-      if (!room.canPlaybackAudio) {
-        report('audioCtx', 'suspended-retrying');
-        ensureAudio();
-      }
+      if (!room.canPlaybackAudio) ensureAudio();
     });
 
     room.on(RoomEvent.Disconnected, function(reason) {
@@ -107,10 +100,6 @@ if (!token || !wsUrl) {
         });
         ensureAudio();
         report('audio', 'subscribed');
-        // Report AudioContext state for diagnostics
-        if (room.audioContext) {
-          report('audioCtx-state', room.audioContext.state);
-        }
       }
     });
 
