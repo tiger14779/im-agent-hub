@@ -55,6 +55,29 @@ mkdir -p "$INSTALL_DIR/bin"
 CGO_ENABLED=0 GOOS=linux go build -a -o "$INSTALL_DIR/bin/im-agent-hub" .
 info "后端编译完成: $(ls -lh $INSTALL_DIR/bin/im-agent-hub | awk '{print $5, $9}')"
 
+# ---------- 重新构建 H5 前端 ----------
+if command -v node &>/dev/null && command -v npm &>/dev/null; then
+    info "重新构建 H5 前端..."
+    cd "$INSTALL_DIR/web/h5"
+    npm install --silent
+    npm run build
+    rm -rf "$INSTALL_DIR/server/static/h5"
+    mkdir -p "$INSTALL_DIR/server/static/h5"
+    cp -r dist/. "$INSTALL_DIR/server/static/h5/"
+    info "H5 前端构建完成"
+
+    info "重新构建管理后台前端..."
+    cd "$INSTALL_DIR/web/admin"
+    npm install --silent
+    npm run build
+    rm -rf "$INSTALL_DIR/server/static/admin"
+    mkdir -p "$INSTALL_DIR/server/static/admin"
+    cp -r dist/. "$INSTALL_DIR/server/static/admin/"
+    info "管理后台前端构建完成"
+else
+    warn "Node.js/npm 未安装，跳过前端构建（静态文件保持不变）"
+fi
+
 # ---------- 重启服务 ----------
 info "重启服务..."
 systemctl restart im-agent-hub
