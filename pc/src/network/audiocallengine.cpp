@@ -2,6 +2,7 @@
 
 #include <QDebug>
 #include <QUrl>
+#include <QVector>
 #include <cmath>
 
 // ── AudioCallEngine ──────────────────────────────────────────────────────────
@@ -60,6 +61,134 @@ QString AudioCallEngine::buildUrl(const QString &wsBase, const QString &serverBa
         base += QStringLiteral("/api/call/audio");
     }
     return QString(QStringLiteral("%1?roomId=%2&token=%3")).arg(base, roomId, token);
+}
+
+// ── 格式转换辅助 ───────────────────────────────────────────────────────────────
+
+static int bytesPerSample(QAudioFormat::SampleFormat fmt)
+{
+    switch (fmt) {
+    case QAudioFormat::UInt8:  return 1;
+    case QAudioFormat::Int16:  return 2;
+    case QAudioFormat::Int32:  return 4;
+    case QAudioFormat::Float:  return 4;
+    default:                   return 0;
+    }
+}
+
+static float decodeSample(const char *data, QAudioFormat::SampleFormat fmt)
+{
+    switch (fmt) {
+    case QAudioFormat::UInt8:  return (*reinterpret_cast<const quint8 *>(data) - 128) / 128.0f;
+    case QAudioFormat::Int16:  return *reinterpret_cast<const qint16 *>(data) / 32768.0f;
+    case QAudioFormat::Int32:  return *reinterpret_cast<const qint32 *>(data) / 2147483648.0f;
+    case QAudioFormat::Float:  return *reinterpret_cast<const float *>(data);
+    default:                   return 0.0f;
+    }
+}
+
+// 将任意采集格式 → 协议格式（8kHz Int16 单声道）
+QByteArray AudioCallEngine::convertToWire(const QByteArray &raw, const QAudioFormat &src)
+{
+    const int srcRate = src.sampleRate();
+    const int srcCh   = src.channelCount();
+    const int bps     = bytesPerSample(src.sampleFormat());
+    if (bps == 0 || srcCh == 0) return {};
+
+    const int nSrcFrames = raw.size() / (bps * srcCh);
+    if (nSrcFrames == 0) return {};
+
+    const char *p = raw.constData();
+
+    // 步骤1：解码并混合声道 → float 单声道
+    QVector<float> mono(nSrcFrames);
+    for (int i = 0; i < nSrcFrames; i++) {
+        float sum = 0;
+        for (int c = 0; c < srcCh; c++)
+            sum += decodeSample(p + (i * srcCh + c) * bps, src.sampleFormat());
+        mono[i] = (srcCh > 1) ? sum / srcCh : sum;
+    }
+
+    // 步骤2：线性插值重采样 srcRate → 8kHz
+    const int dstRate    = 8000;
+    const int nDstFrames = (srcRate == dstRate)
+                           ? nSrcFrames
+                           : static_cast<int>(static_cast<double>(nSrcFrames) * dstRate / srcRate);
+
+    QByteArray out(nDstFrames * static_cast<int>(sizeof(qint16)), Qt::Uninitialized);
+    qint16 *dst16 = reinterpret_cast<qint16 *>(out.data());
+    for (int i = 0; i < nDstFrames; i++) {
+        float sample;
+        if (srcRate == dstRate) {
+            sample = mono[i];
+        } else {
+            const double srcIdx = static_cast<double>(i) * srcRate / dstRate;
+            const int    si0    = static_cast<int>(srcIdx);
+            const int    si1    = qMin(si0 + 1, nSrcFrames - 1);
+            const float  frac   = static_cast<float>(srcIdx - si0);
+            sample = mono[si0] * (1.0f - frac) + mono[si1] * frac;
+        }
+        dst16[i] = static_cast<qint16>(qBound(-32768.0f, sample * 32767.0f, 32767.0f));
+    }
+    return out;
+}
+
+// 将协议格式（8kHz Int16 单声道）→ 任意播放格式
+QByteArray AudioCallEngine::convertFromWire(const QByteArray &wire, const QAudioFormat &dst)
+{
+    const int srcRate    = 8000;
+    const int nSrcFrames = wire.size() / static_cast<int>(sizeof(qint16));
+    if (nSrcFrames == 0) return {};
+
+    const qint16 *src16  = reinterpret_cast<const qint16 *>(wire.constData());
+    const int dstRate    = dst.sampleRate();
+    const int dstCh      = dst.channelCount();
+    const int bps        = bytesPerSample(dst.sampleFormat());
+    if (bps == 0 || dstCh == 0) return {};
+
+    const int nDstFrames = (srcRate == dstRate)
+                           ? nSrcFrames
+                           : static_cast<int>(static_cast<double>(nSrcFrames) * dstRate / srcRate);
+
+    QByteArray out(nDstFrames * dstCh * bps, Qt::Uninitialized);
+    char *p = out.data();
+
+    for (int i = 0; i < nDstFrames; i++) {
+        // 线性插值
+        float sample;
+        if (srcRate == dstRate) {
+            sample = src16[i] / 32768.0f;
+        } else {
+            const double srcIdx = static_cast<double>(i) * srcRate / dstRate;
+            const int    si0    = static_cast<int>(srcIdx);
+            const int    si1    = qMin(si0 + 1, nSrcFrames - 1);
+            const float  frac   = static_cast<float>(srcIdx - si0);
+            sample = src16[si0] / 32768.0f * (1.0f - frac) + src16[si1] / 32768.0f * frac;
+        }
+        sample = qBound(-1.0f, sample, 1.0f);
+
+        // 编码到目标格式，写入所有声道
+        for (int c = 0; c < dstCh; c++) {
+            char *sp = p + (i * dstCh + c) * bps;
+            switch (dst.sampleFormat()) {
+            case QAudioFormat::UInt8:
+                *reinterpret_cast<quint8 *>(sp) = static_cast<quint8>(sample * 127.0f + 128.0f);
+                break;
+            case QAudioFormat::Int16:
+                *reinterpret_cast<qint16 *>(sp) = static_cast<qint16>(sample * 32767.0f);
+                break;
+            case QAudioFormat::Int32:
+                *reinterpret_cast<qint32 *>(sp) = static_cast<qint32>(sample * 2147483647.0f);
+                break;
+            case QAudioFormat::Float:
+                *reinterpret_cast<float *>(sp) = sample;
+                break;
+            default:
+                break;
+            }
+        }
+    }
+    return out;
 }
 
 // ── 设备列表 ──────────────────────────────────────────────────────────────────
@@ -123,6 +252,17 @@ void AudioCallEngine::start(const QString &wsBase, const QString &serverBaseUrl,
         qDebug() << "[AudioCallEngine] 8kHz not supported by output, using preferred format";
         playbackFormat = outputDev.preferredFormat();
     }
+    // 保存实际使用的格式（可能与协议线上格式不同）
+    m_captureFormat  = captureFormat;
+    m_playbackFormat = playbackFormat;
+    qDebug() << "[AudioCallEngine] capture format:"
+             << captureFormat.sampleRate() << "Hz"
+             << captureFormat.channelCount() << "ch"
+             << captureFormat.sampleFormat();
+    qDebug() << "[AudioCallEngine] playback format:"
+             << playbackFormat.sampleRate() << "Hz"
+             << playbackFormat.channelCount() << "ch"
+             << playbackFormat.sampleFormat();
 
     // 启动音频采集
     m_source = new QAudioSource(inputDev, captureFormat, this);
@@ -214,18 +354,32 @@ void AudioCallEngine::onCaptureReady()
         if (m_captureDevice) m_captureDevice->readAll(); // 丢弃静音帧
         return;
     }
-    const QByteArray frame = m_captureDevice->readAll();
-    if (!frame.isEmpty() && m_ws.state() == QAbstractSocket::ConnectedState) {
-        m_ws.sendBinaryMessage(frame);
+    const QByteArray raw = m_captureDevice->readAll();
+    if (raw.isEmpty() || m_ws.state() != QAbstractSocket::ConnectedState) return;
+
+    // 如果采集格式已是协议格式（8kHz Int16 单声道）则直接发送；否则转换
+    const QAudioFormat wire = audioFormat();
+    if (m_captureFormat == wire) {
+        m_ws.sendBinaryMessage(raw);
+    } else {
+        const QByteArray pcm16 = convertToWire(raw, m_captureFormat);
+        if (!pcm16.isEmpty()) m_ws.sendBinaryMessage(pcm16);
     }
 }
 
 void AudioCallEngine::onAudioFrame(const QByteArray &data)
 {
-    // 写入播放设备
-    if (m_playbackDevice && !data.isEmpty()) {
-        m_playbackDevice->write(data);
-    }
-    // 简单 VAD：RMS > 500 认为对端在说话
+    // 简单 VAD：基于原始 8kHz Int16 数据计算 RMS
     emit peerSpeaking(rms(data) > 500);
+
+    if (!m_playbackDevice || data.isEmpty()) return;
+
+    // 如果播放格式已是协议格式则直接写入；否则转换
+    const QAudioFormat wire = audioFormat();
+    if (m_playbackFormat == wire) {
+        m_playbackDevice->write(data);
+    } else {
+        const QByteArray converted = convertFromWire(data, m_playbackFormat);
+        if (!converted.isEmpty()) m_playbackDevice->write(converted);
+    }
 }

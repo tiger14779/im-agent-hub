@@ -123,6 +123,7 @@ async function connectAudioWs(wsBase: string, roomId: string, token: string) {
 
   if (!audioCtx) audioCtx = new AudioContext({ sampleRate: 8000 })
   if (audioCtx.state === 'suspended') await audioCtx.resume().catch(() => {})
+  console.log('[VoiceCall] AudioContext actual sampleRate:', audioCtx.sampleRate)
 
   // 预先确保 captureStream 可用（onAccept 里应已获取）
   if (!captureStream) {
@@ -184,7 +185,8 @@ async function connectAudioWs(wsBase: string, roomId: string, token: string) {
       sumSq += float32[i] * float32[i]
     }
     isSpeaking.value = Math.sqrt(sumSq / int16.length) > 0.015
-    const buf = audioCtx.createBuffer(1, float32.length, audioCtx.sampleRate)
+    // 始终以 8000Hz 创建缓冲，让 AudioContext 自动重采样到输出设备采样率
+    const buf = audioCtx.createBuffer(1, float32.length, 8000)
     buf.getChannelData(0).set(float32)
     const player = audioCtx.createBufferSource()
     player.buffer = buf

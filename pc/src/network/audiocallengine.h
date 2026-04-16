@@ -77,13 +77,22 @@ private slots:
     void onAudioFrame(const QByteArray &data);
 
 private:
-    /** 返回统一的 8kHz/Int16/单声道 格式 */
+    /** 返回统一的 8kHz/Int16/单声道 格式（协议线上格式） */
     static QAudioFormat audioFormat();
     /** 计算 PCM16 帧的 RMS 值（用于 VAD） */
     static qint16 rms(const QByteArray &pcm16);
     /** 根据 wsBase 和 serverBaseUrl 构造完整的 wss:// URL */
     static QString buildUrl(const QString &wsBase, const QString &serverBaseUrl,
                             const QString &roomId, const QString &token);
+    /**
+     * 将任意采集格式的 PCM 转换为协议线上格式（8kHz Int16 单声道）。
+     * 支持多声道混合、样本格式转换（UInt8/Int16/Int32/Float）、线性插值重采样。
+     */
+    static QByteArray convertToWire(const QByteArray &raw, const QAudioFormat &src);
+    /**
+     * 将协议线上格式（8kHz Int16 单声道）转换为播放设备所需的任意格式。
+     */
+    static QByteArray convertFromWire(const QByteArray &wire, const QAudioFormat &dst);
 
     QWebSocket    m_ws;
     QAudioSource *m_source          = nullptr;
@@ -92,6 +101,8 @@ private:
     QIODevice    *m_playbackDevice  = nullptr;
     bool          m_active          = false;
     bool          m_muted           = false;
+    QAudioFormat  m_captureFormat;   // 实际采集格式（可能与协议格式不同）
+    QAudioFormat  m_playbackFormat;  // 实际播放格式（可能与协议格式不同）
 };
 
 #endif // AUDIOCALLENGINE_H
