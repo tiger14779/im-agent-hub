@@ -359,6 +359,9 @@ void AudioCallEngine::stop()
 {
     if (!m_active) return;
 
+    // 先置 false，防止 m_ws.close() 同步触发 disconnected/error 信号导致递归调用 stop()
+    m_active = false;
+
     m_ws.close();
 
     if (m_source) {
@@ -377,7 +380,6 @@ void AudioCallEngine::stop()
         m_ringBuffer = nullptr;
     }
 
-    m_active = false;
     emit activeChanged();
 }
 
