@@ -160,7 +160,9 @@ QByteArray AudioCallEngine::convertToWire(const QByteArray &raw, const QAudioFor
         mono[i] = (srcCh > 1) ? sum / srcCh : sum;
     }
 
-    // 步骤2：线性插值重采样 srcRate → 8kHz
+    // 步骤2：均值框滤波降采样 srcRate → 8kHz
+    // 对每个输出帧，将对应的全部输入样本求均值，
+    // 相当于一个简单的低通（抗混叠）滤波器，消除混叠失真。
     const int dstRate    = 8000;
     const int nDstFrames = (srcRate == dstRate)
                            ? nSrcFrames
@@ -168,18 +170,26 @@ QByteArray AudioCallEngine::convertToWire(const QByteArray &raw, const QAudioFor
 
     QByteArray out(nDstFrames * static_cast<int>(sizeof(qint16)), Qt::Uninitialized);
     qint16 *dst16 = reinterpret_cast<qint16 *>(out.data());
-    for (int i = 0; i < nDstFrames; i++) {
-        float sample;
-        if (srcRate == dstRate) {
-            sample = mono[i];
-        } else {
-            const double srcIdx = static_cast<double>(i) * srcRate / dstRate;
-            const int    si0    = static_cast<int>(srcIdx);
-            const int    si1    = qMin(si0 + 1, nSrcFrames - 1);
-            const float  frac   = static_cast<float>(srcIdx - si0);
-            sample = mono[si0] * (1.0f - frac) + mono[si1] * frac;
+
+    if (srcRate == dstRate) {
+        for (int i = 0; i < nDstFrames; i++)
+            dst16[i] = static_cast<qint16>(qBound(-32768.0f, mono[i] * 32767.0f, 32767.0f));
+    } else {
+        const double ratio = static_cast<double>(srcRate) / dstRate; // e.g. 6.0 for 48k→8k
+        for (int i = 0; i < nDstFrames; i++) {
+            // 对应的源帧范围 [srcStart, srcEnd)
+            const double srcStart = i * ratio;
+            const double srcEnd   = srcStart + ratio;
+            const int    si0      = static_cast<int>(srcStart);
+            const int    si1      = qMin(static_cast<int>(std::ceil(srcEnd)), nSrcFrames);
+            // 对窗口内所有源样本求均值（box filter = 简单低通滤波器）
+            float sum   = 0;
+            int   count = si1 - si0;
+            for (int j = si0; j < si1; j++)
+                sum += mono[j];
+            const float sample = (count > 0) ? sum / count : 0.0f;
+            dst16[i] = static_cast<qint16>(qBound(-32768.0f, sample * 32767.0f, 32767.0f));
         }
-        dst16[i] = static_cast<qint16>(qBound(-32768.0f, sample * 32767.0f, 32767.0f));
     }
     return out;
 }
