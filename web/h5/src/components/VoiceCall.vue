@@ -117,43 +117,61 @@ let incomingTimer: ReturnType<typeof setTimeout> | null = null
 let outgoingTimer: ReturnType<typeof setTimeout> | null = null
 let playbackCursor = 0 // scheduled playback cursor - keeps frames contiguous, no overlap/gap
 let ringtoneCtx: AudioContext | null = null
-let ringtoneTimer: ReturnType<typeof setInterval> | null = null
+let ringtoneTimer: ReturnType<typeof setTimeout> | null = null
+let ringtoneRunning = false
 
-const speakerOn = ref(true)  // default: loudspeaker ON
-// ── 来电提示音 ────────────────────────────────────────────────────
-function playRingBeep() {
+// 默认听筒模式（iOS 上 AudioContext 默认走听筒；开启免提后通过 <audio> 元素切换为扬声器）
+const speakerOn = ref(false)
+
+// ── 来电提示音（双振荡器 + 颤音，模拟真实电话铃声）─────────────────
+function ringBurst(ctx: AudioContext, t: number) {
+  const dur = 0.65
+  // 440Hz + 480Hz 产生 40Hz 拍频 = 经典电话铃的嗡嗡声
+  ;[440, 480].forEach(freq => {
+    const osc = ctx.createOscillator()
+    const g   = ctx.createGain()
+    // 颤音 LFO：8Hz ±5Hz，增加自然感
+    const vib  = ctx.createOscillator()
+    const vibG = ctx.createGain()
+    vib.frequency.value = 8
+    vibG.gain.value = 5
+    vib.connect(vibG)
+    vibG.connect(osc.frequency)
+    vib.start(t); vib.stop(t + dur + 0.05)
+    osc.type = 'triangle'   // triangle 比 sine 更饱满，比 square 更柔和
+    osc.frequency.value = freq
+    osc.connect(g)
+    g.connect(ctx.destination)
+    g.gain.setValueAtTime(0, t)
+    g.gain.linearRampToValueAtTime(0.22, t + 0.025)
+    g.gain.setValueAtTime(0.22, t + dur - 0.07)
+    g.gain.linearRampToValueAtTime(0, t + dur)
+    osc.start(t); osc.stop(t + dur + 0.05)
+  })
+}
+
+function doRingCycle() {
+  if (!ringtoneRunning) return
   try {
     if (!ringtoneCtx || ringtoneCtx.state === 'closed') ringtoneCtx = new AudioContext()
     if (ringtoneCtx.state === 'suspended') ringtoneCtx.resume().catch(() => {})
     const ctx = ringtoneCtx
     const t = ctx.currentTime
-    // 两声准调鸣声：440Hz + 880Hz，间隔 0.28s
-    ;([440, 880] as const).forEach((freq, i) => {
-      const osc = ctx.createOscillator()
-      const g = ctx.createGain()
-      osc.connect(g)
-      g.connect(ctx.destination)
-      osc.type = 'sine'
-      osc.frequency.value = freq
-      const s = t + i * 0.28
-      g.gain.setValueAtTime(0, s)
-      g.gain.linearRampToValueAtTime(0.28, s + 0.02)
-      g.gain.setValueAtTime(0.28, s + 0.15)
-      g.gain.linearRampToValueAtTime(0, s + 0.20)
-      osc.start(s)
-      osc.stop(s + 0.22)
-    })
+    ringBurst(ctx, t)         // 第一声
+    ringBurst(ctx, t + 0.85)  // 第二声（间隔 0.2s）
   } catch (_) {}
+  ringtoneTimer = setTimeout(doRingCycle, 3400) // 每 3.4s 循环
 }
 
 function startRingtone() {
   stopRingtone()
-  playRingBeep()
-  ringtoneTimer = setInterval(playRingBeep, 2200)
+  ringtoneRunning = true
+  doRingCycle()
 }
 
 function stopRingtone() {
-  if (ringtoneTimer) { clearInterval(ringtoneTimer); ringtoneTimer = null }
+  ringtoneRunning = false
+  if (ringtoneTimer) { clearTimeout(ringtoneTimer); ringtoneTimer = null }
   if (ringtoneCtx) { ringtoneCtx.close().catch(() => {}); ringtoneCtx = null }
 }
 // ── 格式化通话时长 ─────────────────────────────────────────────────
@@ -222,16 +240,21 @@ async function connectAudioWs(wsBase: string, roomId: string, token: string) {
     scriptNode.connect(audioCtx.destination)
 
     console.log('[VoiceCall] pipeline ready, phase -> active')
-    // 建立播放增益节点（提升音量）+ 免提路由
+    // 建立播放增益节点 + 免提路由
     playbackGain = audioCtx.createGain()
-    playbackGain.gain.value = 3.0  // 提升 3倍音量
-    // MediaStreamDestination 路由：让 <audio> 元素接管播放，强制使用底部扬声器
+    playbackGain.gain.value = 3.0
     speakerDest = audioCtx.createMediaStreamDestination()
-    playbackGain.connect(speakerDest)
     speakerAudio = new Audio()
-    speakerAudio.srcObject = speakerDest.stream
     speakerAudio.volume = 1.0
-    speakerAudio.play().catch(() => {})
+    // 默认听筒模式：直连 audioCtx.destination，不启动 <audio> 元素
+    // iOS：无 <audio> 元素播放时 AudioContext 走听筒；启动 speakerAudio 后切换为扬声器
+    if (speakerOn.value) {
+      playbackGain.connect(speakerDest)
+      speakerAudio.srcObject = speakerDest.stream
+      speakerAudio.play().catch(() => {})
+    } else {
+      playbackGain.connect(audioCtx.destination)
+    }
     playbackCursor = 0
     phase.value = 'active'
     startDurationTimer()
@@ -383,16 +406,18 @@ function onHangup() {
 // 免提切换
 function toggleSpeaker() {
   speakerOn.value = !speakerOn.value
-  if (!audioCtx || !playbackGain || !speakerDest) return
+  if (!audioCtx || !playbackGain || !speakerDest || !speakerAudio) return
   if (speakerOn.value) {
-    // 免提：断开听筒，通过 <audio> 元素路由到底部扬声器
-    try { playbackGain.disconnect(audioCtx.destination) } catch (_) { /* 未连接则忽略 */ }
+    // 扬声器模式：让 <audio> 元素接管播放 → iOS 切换音频会话为媒体模式 = 底部扬声器
+    try { playbackGain.disconnect(audioCtx.destination) } catch (_) {}
     playbackGain.connect(speakerDest)
-    if (speakerAudio) speakerAudio.play().catch(() => {})
+    speakerAudio.srcObject = speakerDest.stream
+    speakerAudio.play().catch(() => {})
   } else {
-    // 听筒：断开 speakerDest，连接到默认输出（听筒）
+    // 听筒模式：撤销 <audio> 元素 → iOS 音频会话回到通话/听筒模式
     playbackGain.disconnect(speakerDest)
-    if (speakerAudio) speakerAudio.pause()
+    speakerAudio.pause()
+    speakerAudio.srcObject = null  // 释放 srcObject 才能让 iOS 真正切回听筒
     playbackGain.connect(audioCtx.destination)
   }
 }
