@@ -391,6 +391,7 @@ Item {
     function reset() {
         autoCloseTimer.stop()
         outgoingTimeoutTimer.stop()
+        ringtoneEffect.stop()
         AudioCallEngine.stopRingtone()
         durationTimer.stop()
         AudioCallEngine.stop()

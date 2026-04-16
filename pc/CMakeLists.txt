@@ -70,6 +70,7 @@ qt_add_qml_module(${PROJECT_NAME}
     QML_FILES ${QML_FILES}
     RESOURCES
         resources/notify.wav
+        resources/lingsheng.wav
     RESOURCE_PREFIX /
 )
 
