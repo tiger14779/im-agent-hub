@@ -339,16 +339,15 @@ Item {
 
     WebEngineView {
         id: callWebView
-        // Keep inside the visible window area so Chromium does NOT treat this
-        // as an off-screen renderer (off-screen renderers have audio throttled).
-        // 1x1 pixel in the top-left corner, completely invisible to the user.
-        x: 0; y: 0; width: 1; height: 1
+        // Must be inside the window (non-negative position, valid size) so
+        // Chromium does NOT treat this as an off-screen renderer and mute audio.
+        // enabled:false prevents it from consuming mouse events.
+        x: 0; y: 0; width: 4; height: 4
+        enabled: false
         settings.localContentCanAccessRemoteUrls: true
         settings.localContentCanAccessFileUrls:  true
         // Allow media elements to autoplay without a prior user gesture
         settings.playbackRequiresUserGesture: false
-        // Allow WebRTC
-        settings.webRTCPublicInterfacesOnly: false
 
         onFeaturePermissionRequested: function(securityOrigin, feature) {
             if (feature === WebEngineView.MediaAudioCapture)
@@ -371,6 +370,17 @@ Item {
         onLoadingChanged: function(lr) {
             if (lr.status === WebEngineView.LoadFailedStatus)
                 console.log("[VoiceCall] audio bridge load failed:", lr.errorString)
+            // After page loads, trigger startAudio via runJavaScript.
+            // This runs in the renderer context and can resume AudioContext
+            // even without a real user gesture (works with --autoplay-policy=no-user-gesture-required).
+            if (lr.status === WebEngineView.LoadSucceededStatus) {
+                callWebView.runJavaScript(
+                    "if(window.__room){" +
+                    "  window.__room.startAudio()" +
+                    "    .then(function(){console.log('call:audioCtx:running-js')})" +
+                    "    .catch(function(e){console.log('call:audioCtx:err:' + (e&&e.message||'?'))});" +
+                    "}")
+            }
         }
     }
 

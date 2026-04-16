@@ -50,7 +50,9 @@ if (!token || !wsUrl) {
     function ensureAudio() {
       room.startAudio().then(function() {
         report('audioCtx', 'running');
-      }).catch(function() {});
+      }).catch(function(e) {
+        report('audioCtx', 'err:' + (e && e.message ? e.message : 'unknown'));
+      });
     }
 
     room.on(RoomEvent.Connected, function() {
