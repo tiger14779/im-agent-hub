@@ -35,12 +35,20 @@ Item {
         target: AudioCallEngine
         function onPeerSpeaking(speaking) { root._speaking = speaking }
     }
-    // ── 来电铃声（由 AudioCallEngine C++ 合成，仅来电时播放）────────────────────
+    // ── 来电铃声（自定义 WAV，仅来电时播放）────────────────────────────────────
+
+    SoundEffect {
+        id: ringtoneEffect
+        source: "qrc:/ImAgentHub/resources/lingsheng.wav"
+        volume: 0.85
+        loops: SoundEffect.Infinite
+    }
+
     onPhaseChanged: {
         if (phase === "incoming") {
-            AudioCallEngine.playRingtone()
+            ringtoneEffect.play()
         } else {
-            AudioCallEngine.stopRingtone()
+            ringtoneEffect.stop()
         }
     }
 
@@ -392,7 +400,6 @@ Item {
         autoCloseTimer.stop()
         outgoingTimeoutTimer.stop()
         ringtoneEffect.stop()
-        AudioCallEngine.stopRingtone()
         durationTimer.stop()
         AudioCallEngine.stop()
         phase     = "idle"
