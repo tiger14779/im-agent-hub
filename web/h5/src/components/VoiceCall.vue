@@ -111,68 +111,48 @@ const formattedDuration = computed(() => {
 })
 
 // ── WebSocket PCM 音频中继 ──────────────────────────────────────────
+// 关键设计：
+//   1. 音频管道（captureStream → scriptNode → WS）在 onopen 里构建
+//   2. phase = 'active' 也在 onopen 里设置
+//   3. WS 连接失败（onclose 在 connecting 阶段）只显示错误，绝不调 endCall
 async function connectAudioWs(wsBase: string, roomId: string, token: string) {
-  try {
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const base = wsBase || `${proto}//${location.host}/api/call/audio`
-    const url = `${base}?roomId=${encodeURIComponent(roomId)}&token=${encodeURIComponent(token)}`
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const base = wsBase || `${proto}//${location.host}/api/call/audio`
+  const url = `${base}?roomId=${encodeURIComponent(roomId)}&token=${encodeURIComponent(token)}`
+  console.log('[VoiceCall] audio WS url:', url)
 
-    // 若 onAccept/beginOutgoing 已在用户手势中创建，直接复用；否则新建
-    if (!audioCtx) {
-      audioCtx = new AudioContext({ sampleRate: 8000 })
+  if (!audioCtx) audioCtx = new AudioContext({ sampleRate: 8000 })
+  if (audioCtx.state === 'suspended') await audioCtx.resume().catch(() => {})
+
+  // 预先确保 captureStream 可用（onAccept 里应已获取）
+  if (!captureStream) {
+    console.warn('[VoiceCall] captureStream not pre-acquired, requesting now')
+    try {
+      captureStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 } })
+    } catch (err) {
+      const msg = err instanceof Error ? (err.name + ': ' + err.message) : String(err)
+      console.error('[VoiceCall] getUserMedia failed:', msg)
+      callError.value = `麦克风无法使用：${msg}`
+      return // phase 保持 connecting，显示错误
     }
-    // 确保 AudioContext 处于运行状态（用户手势创建后可安全 resume）
-    if (audioCtx.state === 'suspended') {
-      await audioCtx.resume()
+  }
+
+  audioWs = new WebSocket(url)
+  audioWs.binaryType = 'arraybuffer'
+
+  // ── WS 成功连接：此时才构建音频管道并切换到 active ──
+  audioWs.onopen = () => {
+    console.log('[VoiceCall] audio WS connected, building pipeline')
+    if (!audioCtx || !captureStream) {
+      callError.value = '内部错误：音频资源丢失'
+      if (audioWs) { audioWs.onclose = null; audioWs.close(); audioWs = null }
+      return
     }
-
-    // 创建 WebSocket 并立即注册所有事件，避免 await 期间丢失事件
-    audioWs = new WebSocket(url)
-    audioWs.binaryType = 'arraybuffer'
-
-    // 接收对端音频：int16 → float32 → AudioBufferSourceNode（立即注册）
-    audioWs.onmessage = (ev) => {
-      if (!audioCtx || !(ev.data instanceof ArrayBuffer)) return
-      const int16 = new Int16Array(ev.data)
-      const float32 = new Float32Array(int16.length)
-      let sumSq = 0
-      for (let i = 0; i < int16.length; i++) {
-        float32[i] = int16[i] / 32768
-        sumSq += float32[i] * float32[i]
-      }
-      isSpeaking.value = Math.sqrt(sumSq / int16.length) > 0.015
-
-      const buf = audioCtx.createBuffer(1, float32.length, 8000)
-      buf.getChannelData(0).set(float32)
-      const player = audioCtx.createBufferSource()
-      player.buffer = buf
-      player.connect(audioCtx.destination)
-      player.start()
-    }
-
-    audioWs.onclose = () => {
-      if (phase.value === 'active' || phase.value === 'connecting') endCall()
-    }
-    audioWs.onerror = () => {
-      console.error('[VoiceCall] audio WS error')
-      if (phase.value === 'active' || phase.value === 'connecting') endCall()
-    }
-
-    // 麦克风采集（在 WS 事件注册之后才 await，避免丢失 WS 关闭事件）
-    captureStream = await navigator.mediaDevices.getUserMedia({
-      audio: { sampleRate: { ideal: 8000 }, channelCount: 1 }
-    })
-
-    // getUserMedia 本身可能解锁 AudioContext，再次确认
-    if (audioCtx.state === 'suspended') {
-      await audioCtx.resume().catch(() => {})
-    }
+    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {})
 
     const source = audioCtx.createMediaStreamSource(captureStream)
     gainNode = audioCtx.createGain()
     gainNode.gain.value = muted.value ? 0 : 1
-
-    // ScriptProcessorNode: float32 → int16 → WebSocket
     const scriptNode = audioCtx.createScriptProcessor(1024, 1, 1)
     scriptNode.onaudioprocess = (e) => {
       if (!audioWs || audioWs.readyState !== WebSocket.OPEN) return
@@ -185,14 +165,48 @@ async function connectAudioWs(wsBase: string, roomId: string, token: string) {
     }
     source.connect(gainNode)
     gainNode.connect(scriptNode)
-    scriptNode.connect(audioCtx.destination) // Chrome 要求连到 destination 才处理
+    scriptNode.connect(audioCtx.destination)
 
-    // 音频图构建完成，切换到通话中状态
+    console.log('[VoiceCall] pipeline ready → active')
     phase.value = 'active'
     startDurationTimer()
-  } catch (e) {
-    console.error('[VoiceCall] connectAudioWs failed', e)
-    endCall()
+  }
+
+  // ── 接收对端音频 ──
+  audioWs.onmessage = (ev) => {
+    if (!audioCtx || !(ev.data instanceof ArrayBuffer)) return
+    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {})
+    const int16 = new Int16Array(ev.data)
+    const float32 = new Float32Array(int16.length)
+    let sumSq = 0
+    for (let i = 0; i < int16.length; i++) {
+      float32[i] = int16[i] / 32768
+      sumSq += float32[i] * float32[i]
+    }
+    isSpeaking.value = Math.sqrt(sumSq / int16.length) > 0.015
+    const buf = audioCtx.createBuffer(1, float32.length, audioCtx.sampleRate)
+    buf.getChannelData(0).set(float32)
+    const player = audioCtx.createBufferSource()
+    player.buffer = buf
+    player.connect(audioCtx.destination)
+    player.start()
+  }
+
+  // ── WS 关闭：active 才 endCall；connecting 只显示错误，窗口不关 ──
+  audioWs.onclose = (ev) => {
+    console.error('[VoiceCall] audio WS closed', ev.code, ev.reason)
+    if (phase.value === 'active') {
+      endCall()
+    } else if (phase.value === 'connecting') {
+      callError.value = `音频连接失败 (code ${ev.code}) — 请检查网络后重试`
+      audioWs = null
+      // 不调 endCall，保持 connecting 界面显示错误
+    }
+  }
+
+  audioWs.onerror = () => {
+    console.error('[VoiceCall] audio WS error')
+    // onclose 紧接着会触发，错误提示在那里设置
   }
 }
 
