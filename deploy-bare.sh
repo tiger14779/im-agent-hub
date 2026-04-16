@@ -83,42 +83,48 @@ info "=========================================="
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 
-# ---------- 等待 apt 锁释放（云服务器首次启动时系统会自动更新）----------
-wait_apt() {
+# ---------- apt 包装函数：自动等待锁 + 重试 ----------
+# -o DPkg::Lock::Timeout=300 让 apt 自己等锁最多 5 分钟，无需外部轮询
+APT="apt-get -y -qq -o DPkg::Lock::Timeout=300"
+
+apt_install() {
+    $APT install "$@" > /dev/null
+}
+
+# 首次启动时 unattended-upgrades 可能占用锁，先等它自然结束
+wait_apt_initial() {
     local waited=0
-    while fuser /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend /var/cache/apt/archives/lock &>/dev/null; do
+    info "检查 apt 锁状态..."
+    while fuser /var/lib/apt/lists/lock /var/lib/dpkg/lock-frontend &>/dev/null 2>&1; do
         if [ $waited -eq 0 ]; then
-            info "等待系统自动更新完成（最多 3 分钟）..."
+            info "系统后台更新进行中，等待完成（最多 5 分钟）..."
         fi
-        sleep 5
-        waited=$((waited + 5))
-        if [ $waited -ge 180 ]; then
-            warn "等待超时，强制终止占用 apt 的进程..."
+        sleep 5; waited=$((waited+5))
+        if [ $waited -ge 300 ]; then
+            warn "等待超时，强制清除 apt 锁..."
             kill -9 $(fuser /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend 2>/dev/null) 2>/dev/null || true
             rm -f /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend /var/cache/apt/archives/lock
             dpkg --configure -a 2>/dev/null || true
             break
         fi
     done
+    info "apt 锁已释放，继续安装..."
 }
 
 # ---------- 系统更新 ----------
 info "更新系统软件包..."
-wait_apt
-apt-get update -qq
-wait_apt
-apt-get install -y -qq curl wget git build-essential > /dev/null
+wait_apt_initial
+$APT update
+apt_install curl wget git build-essential
 
 # ---------- 安装 PostgreSQL ----------
 if ! command -v psql &> /dev/null; then
     info "正在安装 PostgreSQL 16..."
-    wait_apt
-    apt-get install -y -qq gnupg lsb-release > /dev/null
+    apt_install gnupg lsb-release
     curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/postgresql.gpg
     echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
-    apt-get update -qq
-    wait_apt
-    apt-get install -y -qq postgresql-16 > /dev/null
+    $APT update
+    apt_install postgresql-16
     systemctl enable --now postgresql
     info "PostgreSQL 16 安装完成"
 else
@@ -152,8 +158,7 @@ fi
 if ! command -v node &> /dev/null; then
     info "正在安装 Node.js ${NODE_VERSION}..."
     curl -fsSL "https://deb.nodesource.com/setup_${NODE_VERSION}.x" | bash - > /dev/null 2>&1
-    wait_apt
-    apt-get install -y -qq nodejs > /dev/null
+    apt_install nodejs
     info "Node.js $(node -v) 安装完成"
 else
     info "Node.js 已安装: $(node -v)"
@@ -274,15 +279,13 @@ if [ -n "$DOMAIN" ]; then
     # 安装 Nginx 和 Certbot
     if ! command -v nginx &> /dev/null; then
         info "正在安装 Nginx..."
-        wait_apt
-        apt-get install -y -qq nginx > /dev/null
+        apt_install nginx
         systemctl enable --now nginx
     fi
 
     if ! command -v certbot &> /dev/null; then
         info "正在安装 Certbot..."
-        wait_apt
-        apt-get install -y -qq certbot python3-certbot-nginx > /dev/null
+        apt_install certbot python3-certbot-nginx
     fi
 
     # 生成 Nginx 配置
