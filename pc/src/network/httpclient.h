@@ -104,7 +104,7 @@ public:
     // 下载远程文件后启动系统拖放操作（拖到资源管理器可保存）
     Q_INVOKABLE void startFileDrag(const QString &url, const QString &fileName);
 
-设置（持久化） ===
+    // === 设置（持久化） ===
     // 保存登录配置到本地（userId + serverUrl），下次启动自动填充
     Q_INVOKABLE void saveLoginConfig(const QString &userId, const QString &serverUrl);
     // 读取上次保存的登录配置
@@ -138,7 +138,7 @@ signals:
     void groupMemberChanged(const QString &groupId); // 群成员变化（邀请/踢出后刷新）
     void groupError(const QString &error);           // 群操作失败
 
-    // === 上传相关信号 ──
+    // ── 上传相关信号 ──
     void uploadSuccess(const QString &url, const QString &fileName, qint64 fileSize); // 文件上传成功
     void uploadFailed(const QString &error);   // 文件上传失败
     void avatarUploaded(const QString &url);   // 头像上传成功，返回服务器URL

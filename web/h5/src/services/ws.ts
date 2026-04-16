@@ -278,7 +278,6 @@ class ChatWsService {
         this.onCallAudioReady(d)
         break
       }
-      }
       default:
         console.log('[WS] unknown type', env.type)
     }

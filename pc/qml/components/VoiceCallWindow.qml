@@ -9,7 +9,7 @@ Item {
     id: root
 
     // ── Public API (used by ChatPage.qml) ─────────────────────────────
-    property string phase:       "idle"    // idle | incoming | outgoing | active
+    property string phase:       "idle"    // idle | incoming | connecting | outgoing | active
     property string peerId:      ""
     property string peerName:    ""
     property string roomId:      ""
@@ -77,9 +77,10 @@ Item {
         flags:    Qt.Window | Qt.WindowStaysOnTopHint | Qt.WindowTitleHint | Qt.WindowCloseButtonHint
         modality: Qt.NonModal
         color: "#0f0f1c"
-        visible: root.phase === "incoming" || root.phase === "outgoing" || root.statusMsg.length > 0
-        title:  root.phase === "incoming" ? ("\u6765\u7535 \u00b7 " + root.peerName)
-              : root.phase === "outgoing" ? ("\u547c\u53eb\u4e2d \u00b7 " + root.peerName)
+        visible: root.phase === "incoming" || root.phase === "connecting" || root.phase === "outgoing" || root.statusMsg.length > 0
+        title:  root.phase === "incoming"   ? ("\u6765\u7535 \u00b7 " + root.peerName)
+              : root.phase === "connecting" ? ("\u8fde\u63a5\u4e2d \u00b7 " + root.peerName)
+              : root.phase === "outgoing"   ? ("\u547c\u53eb\u4e2d \u00b7 " + root.peerName)
               : "\u901a\u8bdd\u63d0\u793a"
         onClosing: { autoCloseTimer.stop(); root.reset() }
 
@@ -138,7 +139,8 @@ Item {
             Label {
                 Layout.alignment: Qt.AlignHCenter
                 text: root.statusMsg.length > 0 ? root.statusMsg
-                    : root.phase === "incoming" ? "\u9080\u8bf7\u4f60\u8bed\u97f3\u901a\u8bdd"
+                    : root.phase === "incoming"   ? "\u9080\u8bf7\u4f60\u8bed\u97f3\u901a\u8bdd"
+                    : root.phase === "connecting" ? "\u6b63\u5728\u8fde\u63a5..."
                     : "\u6b63\u5728\u547c\u53eb..."
                 color: root.statusMsg.length > 0 ? "#f87171" : "#9ca3af"
                 font.pixelSize: 13

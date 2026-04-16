@@ -712,6 +712,7 @@ Page {
 
         // 来电：客服点击接听 → 发 call_accept 到服务端，等待 call_audio_ready 后开始通话
         onCallAccepted: {
+            voiceCallWindow.phase = "connecting"
             WsClient.sendCallAccept(voiceCallWindow.peerId)
         }
 
@@ -752,7 +753,7 @@ Page {
 
         function onCallAudioReady(roomId, token, wsBase) {
             console.log("[AudioCall] call_audio_ready room=", roomId, "phase=", voiceCallWindow.phase)
-            if (voiceCallWindow.phase === "outgoing" || voiceCallWindow.phase === "incoming") {
+            if (voiceCallWindow.phase === "outgoing" || voiceCallWindow.phase === "incoming" || voiceCallWindow.phase === "connecting") {
                 voiceCallWindow.roomId      = roomId
                 voiceCallWindow.audioToken  = token
                 voiceCallWindow.audioWsBase = wsBase

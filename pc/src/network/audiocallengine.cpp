@@ -112,18 +112,20 @@ void AudioCallEngine::start(const QString &wsBase, const QString &serverBaseUrl,
         }
     }
 
-    // 验证格式支持
+    // 尝试用 8kHz 启动；若设备不支持则回退到设备首选格式（WASAPI 共享模式）
+    QAudioFormat captureFormat = fmt;
     if (!inputDev.isFormatSupported(fmt)) {
-        emit errorOccurred(QStringLiteral("输入设备不支持 8kHz PCM16 格式"));
-        return;
+        qDebug() << "[AudioCallEngine] 8kHz not supported by input, using preferred format";
+        captureFormat = inputDev.preferredFormat();
     }
+    QAudioFormat playbackFormat = fmt;
     if (!outputDev.isFormatSupported(fmt)) {
-        emit errorOccurred(QStringLiteral("输出设备不支持 8kHz PCM16 格式"));
-        return;
+        qDebug() << "[AudioCallEngine] 8kHz not supported by output, using preferred format";
+        playbackFormat = outputDev.preferredFormat();
     }
 
     // 启动音频采集
-    m_source = new QAudioSource(inputDev, fmt, this);
+    m_source = new QAudioSource(inputDev, captureFormat, this);
     m_captureDevice = m_source->start();
     if (!m_captureDevice) {
         emit errorOccurred(QStringLiteral("麦克风启动失败"));
@@ -133,7 +135,7 @@ void AudioCallEngine::start(const QString &wsBase, const QString &serverBaseUrl,
     connect(m_captureDevice, &QIODevice::readyRead, this, &AudioCallEngine::onCaptureReady);
 
     // 启动音频播放
-    m_sink = new QAudioSink(outputDev, fmt, this);
+    m_sink = new QAudioSink(outputDev, playbackFormat, this);
     m_playbackDevice = m_sink->start();
     if (!m_playbackDevice) {
         emit errorOccurred(QStringLiteral("扬声器启动失败"));
