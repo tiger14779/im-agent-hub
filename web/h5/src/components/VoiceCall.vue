@@ -11,12 +11,12 @@
           <div v-if="callError" class="call-error-msg">{{ callError }}</div>
           <div class="call-actions">
             <button class="call-btn reject" @click="onReject">
-              <span class="call-icon">📵</span>
+              <span class="call-icon"><svg class="call-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9"/><line x1="23" y1="1" x2="1" y2="23"/></svg></span>
               <span>拒绝</span>
             </button>
             <button class="call-btn accept" @click="onAccept" :disabled="acceptPending">
-              <span class="call-icon">📞</span>
-              <span>{{ acceptPending ? '请稿...' : '接听' }}</span>
+              <span class="call-icon"><svg class="call-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.37 2 2 0 0 1 3.6 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 9a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg></span>
+              <span>{{ acceptPending ? '请稍...' : '接听' }}</span>
             </button>
           </div>
         </div>
@@ -31,7 +31,7 @@
           <div v-if="callError" class="call-error-msg">{{ callError }}</div>
           <div class="call-actions">
             <button class="call-btn hangup" @click="onHangup">
-              <span class="call-icon">📵</span>
+              <span class="call-icon"><svg class="call-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9"/><line x1="23" y1="1" x2="1" y2="23"/></svg></span>
               <span>挂断</span>
             </button>
           </div>
@@ -46,15 +46,21 @@
           <div class="call-timer">{{ formattedDuration }}</div>
           <div class="call-actions">
             <button class="call-btn mute" :class="{ active: muted }" @click="toggleMute">
-              <span class="call-icon">{{ muted ? '🔇' : '🎤' }}</span>
+              <span class="call-icon">
+                <svg v-if="!muted" class="call-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+                <svg v-else class="call-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+              </span>
               <span>{{ muted ? '取消静音' : '静音' }}</span>
             </button>
             <button class="call-btn speaker" :class="{ active: speakerOn }" @click="toggleSpeaker">
-              <span class="call-icon">{{ speakerOn ? '🔊' : '🔈' }}</span>
+              <span class="call-icon">
+                <svg v-if="speakerOn" class="call-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+                <svg v-else class="call-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+              </span>
               <span>{{ speakerOn ? '免提' : '听筒' }}</span>
             </button>
             <button class="call-btn hangup" @click="onHangup">
-              <span class="call-icon">📵</span>
+              <span class="call-icon"><svg class="call-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9"/><line x1="23" y1="1" x2="1" y2="23"/></svg></span>
               <span>挂断</span>
             </button>
           </div>
@@ -69,7 +75,7 @@
           <div class="call-hint">等待对方接听...</div>
           <div class="call-actions">
             <button class="call-btn hangup" @click="onCancel">
-              <span class="call-icon">📵</span>
+              <span class="call-icon"><svg class="call-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9"/><line x1="23" y1="1" x2="1" y2="23"/></svg></span>
               <span>取消</span>
             </button>
           </div>
@@ -509,6 +515,13 @@ onUnmounted(() => { endCall() })
 .call-btn.reject .call-icon, .call-btn.hangup .call-icon { background: #ef4444; }
 .call-btn.mute .call-icon { background: #374151; }
 .call-btn.mute.active .call-icon { background: #f59e0b; }
+.call-btn.speaker .call-icon { background: #374151; }
+.call-btn.speaker.active .call-icon { background: #3b82f6; }
+.call-icon-svg {
+  width: 26px;
+  height: 26px;
+  display: block;
+}
 
 .call-fade-enter-active,
 .call-fade-leave-active { transition: opacity 0.25s; }
