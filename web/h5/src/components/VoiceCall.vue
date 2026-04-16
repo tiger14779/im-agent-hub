@@ -102,6 +102,7 @@ let captureStream: MediaStream | null = null
 let gainNode: GainNode | null = null
 let incomingTimer: ReturnType<typeof setTimeout> | null = null
 let outgoingTimer: ReturnType<typeof setTimeout> | null = null
+let playbackCursor = 0 // scheduled playback cursor - keeps frames contiguous, no overlap/gap
 
 // ── 格式化通话时长 ─────────────────────────────────────────────────
 const formattedDuration = computed(() => {
@@ -168,7 +169,8 @@ async function connectAudioWs(wsBase: string, roomId: string, token: string) {
     gainNode.connect(scriptNode)
     scriptNode.connect(audioCtx.destination)
 
-    console.log('[VoiceCall] pipeline ready → active')
+    console.log('[VoiceCall] pipeline ready, phase -> active')
+    playbackCursor = 0
     phase.value = 'active'
     startDurationTimer()
   }
@@ -185,13 +187,20 @@ async function connectAudioWs(wsBase: string, roomId: string, token: string) {
       sumSq += float32[i] * float32[i]
     }
     isSpeaking.value = Math.sqrt(sumSq / int16.length) > 0.015
-    // 始终以 48000Hz 创建缓冲，让 AudioContext 自动重采样到输出设备采样率
     const buf = audioCtx.createBuffer(1, float32.length, 48000)
     buf.getChannelData(0).set(float32)
     const player = audioCtx.createBufferSource()
     player.buffer = buf
     player.connect(audioCtx.destination)
-    player.start()
+
+    // 调度播放：维护时间游标，让每个帧严格接续，消除报文重叠戚斩断
+    const now = audioCtx.currentTime
+    if (playbackCursor < now + 0.02) {
+      // 游标落后超过 20ms（初始化或长时间延迟后），重置并加 60ms 抖动缓冲
+      playbackCursor = now + 0.06
+    }
+    player.start(playbackCursor)
+    playbackCursor += buf.duration
   }
 
   // ── WS 关闭：active 才 endCall；connecting 只显示错误，窗口不关 ──
