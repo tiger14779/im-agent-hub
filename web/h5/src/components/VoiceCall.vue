@@ -339,13 +339,15 @@ function toggleSpeaker() {
   speakerOn.value = !speakerOn.value
   if (!audioCtx || !playbackGain || !speakerDest) return
   if (speakerOn.value) {
-    // 免提：通过 <audio> 元素路由，底部扬声器
+    // 免提：断开听筒，通过 <audio> 元素路由到底部扬声器
+    try { playbackGain.disconnect(audioCtx.destination) } catch (_) { /* 未连接则忽略 */ }
     playbackGain.connect(speakerDest)
     if (speakerAudio) speakerAudio.play().catch(() => {})
   } else {
-    // 听筒：断开 speakerDest，转回默认耗机 receiver
+    // 听筒：断开 speakerDest，连接到默认输出（听筒）
     playbackGain.disconnect(speakerDest)
     if (speakerAudio) speakerAudio.pause()
+    playbackGain.connect(audioCtx.destination)
   }
 }
 // ── 静音切换 ──────────────────────────────────────────────────────
