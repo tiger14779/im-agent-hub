@@ -2,114 +2,111 @@
 <html>
 <head><meta charset="UTF-8"></head>
 <body>
-<script>
-/* LiveKit audio bridge - no UI, reports events via console.log('call:cmd:data') */
-var room = null;
+<!--
+  LiveKit audio bridge — no UI, reports events via console.log("call:cmd:data").
+  Variables are injected by VoiceCallWindow.qml as a <script> block in <head>:
+    window.__callToken   - LiveKit JWT
+    window.__callWsUrl   - wss://livekit server URL
+    window.__callMyId    - local participant identity
+    window.__livekitSrc  - "/lk.js" (relative, resolved against server base URL)
+  Using <script type="module"> so top-level await works and module imports are
+  handled correctly by Chromium without CORS issues (same-origin via base URL).
+-->
+<script type="module">
+var token = window.__callToken;
+var wsUrl = window.__callWsUrl;
+var myId  = window.__callMyId || '';
+var lkSrc = window.__livekitSrc || 'https://cdn.jsdelivr.net/npm/livekit-client@2/+esm';
 
 function report(cmd, data) {
   console.log('call:' + cmd + (data !== undefined ? ':' + String(data) : ''));
 }
 
+// Exposed for QML runJavaScript: window.__room.disconnect()
+window.__room = null;
+
+// Exposed for QML runJavaScript: window.setMicMuted(true/false)
 window.setMicMuted = function(muted) {
-  if (room && room.localParticipant) {
-    room.localParticipant.setMicrophoneEnabled(!muted).catch(function(){});
+  if (window.__room && window.__room.localParticipant) {
+    window.__room.localParticipant.setMicrophoneEnabled(!muted).catch(function(){});
   }
 };
 
-document.addEventListener('DOMContentLoaded', function() {
-  var token = window.__callToken;
-  var wsUrl  = window.__callWsUrl;
-  var myId   = window.__callMyId || '';
+if (!token || !wsUrl) {
+  report('error', 'missing-params');
+} else {
+  try {
+    const { Room, RoomEvent } = await import(lkSrc);
 
-  if (!token || !wsUrl) {
-    report('error', 'missing-params');
-    return;
-  }
-
-  // Use server-hosted bundle (avoids CDN blocks in China).
-  // Falls back to CDN if server URL is not injected.
-  var lkSrc = window.__livekitSrc || 'https://cdn.jsdelivr.net/npm/livekit-client@2/+esm';
-
-  import(lkSrc)
-    .then(function(mod) {
-      var Room      = mod.Room;
-      var RoomEvent = mod.RoomEvent;
-
-      room = new Room({
-        audioCaptureDefaults: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        }
-      });
-
-      // livekit-client@2 uses AudioContext internally; must call startAudio()
-      // to keep it in "running" state, especially in headless WebEngineView
-      function ensureAudio() {
-        room.startAudio().then(function() {
-          report('audioCtx', 'running');
-        }).catch(function() {});
+    var room = new Room({
+      audioCaptureDefaults: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl:  true
       }
-
-      room.on(RoomEvent.Connected, function() {
-        report('connected');
-        ensureAudio();
-        room.localParticipant.setMicrophoneEnabled(true).catch(function(e) {
-          report('error', 'mic:' + ((e && e.message) ? e.message : 'failed'));
-        });
-      });
-
-      // Called when AudioContext needs to be resumed (e.g. after browser suspend)
-      room.on(RoomEvent.AudioPlaybackStatusChanged, function() {
-        if (!room.canPlaybackAudio) {
-          report('audioCtx', 'suspended-retrying');
-          ensureAudio();
-        }
-      });
-
-      room.on(RoomEvent.Disconnected, function(reason) {
-        report('disconnected', reason || '');
-      });
-
-      room.on(RoomEvent.Reconnecting, function() {
-        report('reconnecting');
-      });
-
-      room.on(RoomEvent.Reconnected, function() {
-        report('reconnected');
-        ensureAudio();
-        room.localParticipant.setMicrophoneEnabled(true).catch(function(){});
-      });
-
-      // Attach incoming audio tracks to <audio> elements so they play
-      room.on(RoomEvent.TrackSubscribed, function(track) {
-        if (track.kind === 'audio') {
-          var el = track.attach();
-          el.autoplay = true;
-          document.body.appendChild(el);
-          // Also try resuming AudioContext after track arrives
-          ensureAudio();
-          report('audio', 'subscribed');
-        }
-      });
-
-      room.on(RoomEvent.TrackUnsubscribed, function(track) {
-        track.detach();
-      });
-
-      room.on(RoomEvent.ActiveSpeakersChanged, function(speakers) {
-        var hasPeer = speakers.some(function(s) { return s.identity !== myId; });
-        report('speaking', hasPeer ? '1' : '0');
-      });
-
-      room.connect(wsUrl, token).catch(function(err) {
-        report('error', err.message || 'connect-failed');
-      });
-    })
-    .catch(function(err) {
-      report('error', err.message || 'load-failed');
     });
-});
+    window.__room = room;
+
+    function ensureAudio() {
+      room.startAudio().then(function() {
+        report('audioCtx', 'running');
+      }).catch(function() {});
+    }
+
+    room.on(RoomEvent.Connected, function() {
+      report('connected');
+      ensureAudio();
+      room.localParticipant.setMicrophoneEnabled(true).catch(function(e) {
+        report('error', 'mic:' + ((e && e.message) ? e.message : 'failed'));
+      });
+    });
+
+    room.on(RoomEvent.AudioPlaybackStatusChanged, function() {
+      if (!room.canPlaybackAudio) {
+        report('audioCtx', 'suspended-retrying');
+        ensureAudio();
+      }
+    });
+
+    room.on(RoomEvent.Disconnected, function(reason) {
+      report('disconnected', reason || '');
+    });
+
+    room.on(RoomEvent.Reconnecting, function() {
+      report('reconnecting');
+    });
+
+    room.on(RoomEvent.Reconnected, function() {
+      report('reconnected');
+      ensureAudio();
+      room.localParticipant.setMicrophoneEnabled(true).catch(function(){});
+    });
+
+    room.on(RoomEvent.TrackSubscribed, function(track) {
+      if (track.kind === 'audio') {
+        var el = track.attach();
+        el.autoplay = true;
+        document.body.appendChild(el);
+        ensureAudio();
+        report('audio', 'subscribed');
+      }
+    });
+
+    room.on(RoomEvent.TrackUnsubscribed, function(track) {
+      track.detach();
+    });
+
+    room.on(RoomEvent.ActiveSpeakersChanged, function(speakers) {
+      var hasPeer = speakers.some(function(s) { return s.identity !== myId; });
+      report('speaking', hasPeer ? '1' : '0');
+    });
+
+    await room.connect(wsUrl, token);
+
+  } catch(err) {
+    report('error', (err && err.message) ? err.message : 'load-failed');
+  }
+}
 </script>
 </body>
 </html>

@@ -62,6 +62,7 @@ func SetupRouter(
 		}
 		c.Header("Content-Type", "application/javascript; charset=utf-8")
 		c.Header("Cache-Control", "max-age=3600")
+		c.Header("Access-Control-Allow-Origin", "*")
 		c.File(matches[0])
 	})
 

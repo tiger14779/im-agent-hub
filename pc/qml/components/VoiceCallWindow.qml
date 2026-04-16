@@ -404,14 +404,16 @@ Item {
         xhr.onreadystatechange = function() {
             if (xhr.readyState !== XMLHttpRequest.DONE) return
             var html = xhr.responseText
+            var baseUrl = HttpClient.baseUrl
+            if (!baseUrl.endsWith('/')) baseUrl = baseUrl + '/'
             var inj  = '<script>window.__callToken=' + JSON.stringify(token)
                 + ';window.__callWsUrl=' + JSON.stringify(realWsUrl)
                 + ';window.__callPeer='  + JSON.stringify(peer)
                 + ';window.__callMyId='  + JSON.stringify(myid)
-                + ';window.__livekitSrc=' + JSON.stringify(HttpClient.baseUrl + '/lk.js')
+                + ';window.__livekitSrc=' + JSON.stringify('/lk.js')
                 + ';<\/script>'
             html = html.replace('<head>', '<head>' + inj)
-            callWebView.loadHtml(html, 'http://localhost:8888/')
+            callWebView.loadHtml(html, baseUrl)
             console.log("[VoiceCall] audio bridge loaded")
         }
         xhr.open('GET', 'qrc:/ImAgentHub/resources/call.html')
@@ -425,7 +427,7 @@ Item {
         durationTimer.stop()
         WxBridge.stopLivekitProxy()
         callWebView.runJavaScript(
-            "if(typeof room!=='undefined'&&room){room.disconnect();room=null;}")
+            "if(window.__room){window.__room.disconnect();window.__room=null;}")
         callWebView.url = "about:blank"
         phase     = "idle"
         statusMsg = ""
