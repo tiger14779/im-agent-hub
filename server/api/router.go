@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"os"
 	"path/filepath"
 
 	"im-agent-hub/service"
@@ -53,16 +54,25 @@ func SetupRouter(
 	// Admin auth (no JWT required)
 	r.POST("/api/admin/auth/login", AdminLogin())
 
-	// Serve livekit-client ESM bundle (built by H5 Vite, served locally to avoid CDN blocks)
+	// Serve livekit-client ESM bundle locally (avoids CDN blocks in China).
+	// Prefer livekit-client-esm.mjs (true ESM with export{Room,...}) over the
+	// Vite chunk file which lacks top-level exports and cannot be used via import().
 	r.GET("/lk.js", func(c *gin.Context) {
+		c.Header("Content-Type", "application/javascript; charset=utf-8")
+		c.Header("Cache-Control", "max-age=3600")
+		c.Header("Access-Control-Allow-Origin", "*")
+		// First try the dedicated ESM copy (has proper export{Room,RoomEvent,...})
+		esmPath := "./static/h5/assets/livekit-client-esm.mjs"
+		if _, err := os.Stat(esmPath); err == nil {
+			c.File(esmPath)
+			return
+		}
+		// Fallback: any livekit-client bundle in the assets dir
 		matches, err := filepath.Glob("./static/h5/assets/livekit-client*.js")
 		if err != nil || len(matches) == 0 {
 			c.JSON(http.StatusNotFound, gin.H{"error": "livekit-client bundle not found"})
 			return
 		}
-		c.Header("Content-Type", "application/javascript; charset=utf-8")
-		c.Header("Cache-Control", "max-age=3600")
-		c.Header("Access-Control-Allow-Origin", "*")
 		c.File(matches[0])
 	})
 
