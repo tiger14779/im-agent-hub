@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtMultimedia
 import ImAgentHub
 
 // VoiceCallWindow — pure-QML UI, uses AudioCallEngine for native PCM audio
@@ -34,7 +35,23 @@ Item {
         target: AudioCallEngine
         function onPeerSpeaking(speaking) { root._speaking = speaking }
     }
+    // ── Ringtone ──────────────────────────────────────────────────────────
 
+    SoundEffect {
+        id: ringtoneEffect
+        source: "qrc:/ImAgentHub/resources/notify.wav"
+        volume: 0.75
+    }
+
+    // Play immediately when phase enters incoming/outgoing; repeat every 2.2s
+    Timer {
+        id: ringtoneTimer
+        interval: 2200
+        repeat: true
+        running: (root.phase === "incoming" || root.phase === "outgoing") && root.statusMsg.length === 0
+        onRunningChanged: if (running) ringtoneEffect.play()
+        onTriggered: ringtoneEffect.play()
+    }
     // ── Timers ────────────────────────────────────────────────────────
 
     // Auto-close popup after reject/busy hint
@@ -382,6 +399,8 @@ Item {
     function reset() {
         autoCloseTimer.stop()
         outgoingTimeoutTimer.stop()
+        ringtoneTimer.stop()
+        ringtoneEffect.stop()
         durationTimer.stop()
         AudioCallEngine.stop()
         phase     = "idle"

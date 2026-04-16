@@ -116,9 +116,46 @@ let speakerAudio: HTMLAudioElement | null = null    // <audio> element for louds
 let incomingTimer: ReturnType<typeof setTimeout> | null = null
 let outgoingTimer: ReturnType<typeof setTimeout> | null = null
 let playbackCursor = 0 // scheduled playback cursor - keeps frames contiguous, no overlap/gap
+let ringtoneCtx: AudioContext | null = null
+let ringtoneTimer: ReturnType<typeof setInterval> | null = null
 
 const speakerOn = ref(true)  // default: loudspeaker ON
+// ── 来电提示音 ────────────────────────────────────────────────────
+function playRingBeep() {
+  try {
+    if (!ringtoneCtx || ringtoneCtx.state === 'closed') ringtoneCtx = new AudioContext()
+    if (ringtoneCtx.state === 'suspended') ringtoneCtx.resume().catch(() => {})
+    const ctx = ringtoneCtx
+    const t = ctx.currentTime
+    // 两声准调鸣声：440Hz + 880Hz，间隔 0.28s
+    ;([440, 880] as const).forEach((freq, i) => {
+      const osc = ctx.createOscillator()
+      const g = ctx.createGain()
+      osc.connect(g)
+      g.connect(ctx.destination)
+      osc.type = 'sine'
+      osc.frequency.value = freq
+      const s = t + i * 0.28
+      g.gain.setValueAtTime(0, s)
+      g.gain.linearRampToValueAtTime(0.28, s + 0.02)
+      g.gain.setValueAtTime(0.28, s + 0.15)
+      g.gain.linearRampToValueAtTime(0, s + 0.20)
+      osc.start(s)
+      osc.stop(s + 0.22)
+    })
+  } catch (_) {}
+}
 
+function startRingtone() {
+  stopRingtone()
+  playRingBeep()
+  ringtoneTimer = setInterval(playRingBeep, 2200)
+}
+
+function stopRingtone() {
+  if (ringtoneTimer) { clearInterval(ringtoneTimer); ringtoneTimer = null }
+  if (ringtoneCtx) { ringtoneCtx.close().catch(() => {}); ringtoneCtx = null }
+}
 // ── 格式化通话时长 ─────────────────────────────────────────────────
 const formattedDuration = computed(() => {
   const m = Math.floor(duration.value / 60).toString().padStart(2, '0')
@@ -260,6 +297,7 @@ chatWs.onCallInvite = (data: CallInviteData) => {
   callerName.value = data.fromName || data.fromId
   callFromId.value = data.fromId
   phase.value = 'incoming'
+  startRingtone()
   // 30 秒无操作自动拒绝
   incomingTimer = setTimeout(() => {
     if (phase.value === 'incoming') {
@@ -299,6 +337,7 @@ chatWs.onCallAccept = (_data: CallSignalData) => {
 // ── 接听 ──────────────────────────────────────────────────────────
 async function onAccept() {
   if (incomingTimer) { clearTimeout(incomingTimer); incomingTimer = null }
+  stopRingtone()
   callError.value = ''
   acceptPending.value = true
 
@@ -324,6 +363,7 @@ async function onAccept() {
 
 // ── 拒绝 ──────────────────────────────────────────────────────────
 function onReject() {
+  stopRingtone()
   chatWs.sendCallReject(callFromId.value)
   endCall()
 }
@@ -364,6 +404,7 @@ function toggleMute() {
 
 // ── 结束通话清理 ──────────────────────────────────────────────────
 function endCall() {
+  stopRingtone()
   if (audioWs) { audioWs.onclose = null; audioWs.close(); audioWs = null }
   if (captureStream) { captureStream.getTracks().forEach(t => t.stop()); captureStream = null }
   if (speakerAudio) { speakerAudio.pause(); speakerAudio.srcObject = null; speakerAudio = null }
