@@ -121,7 +121,7 @@ async function connectAudioWs(wsBase: string, roomId: string, token: string) {
   const url = `${base}?roomId=${encodeURIComponent(roomId)}&token=${encodeURIComponent(token)}`
   console.log('[VoiceCall] audio WS url:', url)
 
-  if (!audioCtx) audioCtx = new AudioContext({ sampleRate: 8000 })
+  if (!audioCtx) audioCtx = new AudioContext({ sampleRate: 48000 })
   if (audioCtx.state === 'suspended') await audioCtx.resume().catch(() => {})
   console.log('[VoiceCall] AudioContext actual sampleRate:', audioCtx.sampleRate)
 
@@ -185,8 +185,8 @@ async function connectAudioWs(wsBase: string, roomId: string, token: string) {
       sumSq += float32[i] * float32[i]
     }
     isSpeaking.value = Math.sqrt(sumSq / int16.length) > 0.015
-    // 始终以 8000Hz 创建缓冲，让 AudioContext 自动重采样到输出设备采样率
-    const buf = audioCtx.createBuffer(1, float32.length, 8000)
+    // 始终以 48000Hz 创建缓冲，让 AudioContext 自动重采样到输出设备采样率
+    const buf = audioCtx.createBuffer(1, float32.length, 48000)
     buf.getChannelData(0).set(float32)
     const player = audioCtx.createBufferSource()
     player.buffer = buf
@@ -264,7 +264,7 @@ async function onAccept() {
   acceptPending.value = true
 
   // 在用户手势上下文中立即创建 AudioContext
-  if (!audioCtx) audioCtx = new AudioContext({ sampleRate: 8000 })
+  if (!audioCtx) audioCtx = new AudioContext({ sampleRate: 48000 })
 
   // 在用户点击时就申请麦克风权限；如果失败则留在 incoming 界面显示错误
   if (!captureStream) {
@@ -335,7 +335,7 @@ function beginOutgoing(peerId: string, peerName: string) {
   callerName.value = peerName
   // 在用户手势上下文中立即创建 AudioContext
   if (!audioCtx) {
-    audioCtx = new AudioContext({ sampleRate: 8000 })
+    audioCtx = new AudioContext({ sampleRate: 48000 })
   }
   phase.value = 'outgoing'
   // 发出邀请

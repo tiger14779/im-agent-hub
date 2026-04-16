@@ -79,7 +79,7 @@ AudioCallEngine::~AudioCallEngine()
 QAudioFormat AudioCallEngine::audioFormat()
 {
     QAudioFormat fmt;
-    fmt.setSampleRate(8000);
+    fmt.setSampleRate(48000);  // 协议线上格式升级为 48kHz，无需降采样，消除混叠失真
     fmt.setChannelCount(1);
     fmt.setSampleFormat(QAudioFormat::Int16);
     return fmt;
