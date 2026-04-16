@@ -450,3 +450,94 @@ void AudioCallEngine::onAudioFrame(const QByteArray &data)
         if (!converted.isEmpty()) m_ringBuffer->push(converted);
     }
 }
+
+// ── 来电铃声合成 ──────────────────────────────────────────────────────────────
+// 铃声模式（循环 3400ms）：
+//   0   – 650ms : 440Hz + 480Hz 双音（拍频 40Hz，经典电话铃感）
+//   650 – 850ms : 静音
+//   850 – 1500ms: 440Hz + 480Hz 双音（第二声）
+//   1500– 3400ms: 静音
+
+void AudioCallEngine::playRingtone()
+{
+    stopRingtone();
+
+    QAudioFormat fmt;
+    fmt.setSampleRate(44100);
+    fmt.setChannelCount(1);
+    fmt.setSampleFormat(QAudioFormat::Int16);
+
+    m_ringtoneBuffer = new AudioRingBuffer(this);
+    m_ringtoneSink   = new QAudioSink(QMediaDevices::defaultAudioOutput(), fmt, this);
+    m_ringtoneSink->start(m_ringtoneBuffer);
+    m_ringSamplePos  = 0;
+
+    m_ringtoneTimer  = new QTimer(this);
+    connect(m_ringtoneTimer, &QTimer::timeout, this, &AudioCallEngine::onRingtoneTick);
+    m_ringtoneTimer->start(40);
+    onRingtoneTick(); // 立即填充第一块
+}
+
+void AudioCallEngine::stopRingtone()
+{
+    if (m_ringtoneTimer) {
+        m_ringtoneTimer->stop();
+        delete m_ringtoneTimer;
+        m_ringtoneTimer = nullptr;
+    }
+    if (m_ringtoneSink) {
+        m_ringtoneSink->stop();
+        delete m_ringtoneSink;
+        m_ringtoneSink = nullptr;
+    }
+    if (m_ringtoneBuffer) {
+        delete m_ringtoneBuffer;
+        m_ringtoneBuffer = nullptr;
+    }
+    m_ringSamplePos = 0;
+}
+
+void AudioCallEngine::onRingtoneTick()
+{
+    if (!m_ringtoneBuffer) return;
+
+    static constexpr int kSampleRate    = 44100;
+    static constexpr int kChunkSamples  = kSampleRate * 40 / 1000;   // 40ms = 1764 samples
+    static constexpr int kCycleSamples  = kSampleRate * 3400 / 1000; // 3400ms cycle
+    static constexpr int kBurst1End     = kSampleRate * 650  / 1000;
+    static constexpr int kBurst2Start   = kSampleRate * 850  / 1000;
+    static constexpr int kBurst2End     = kSampleRate * 1500 / 1000;
+    static constexpr int kFadeInSamples = kSampleRate * 25   / 1000;
+    static constexpr int kFadeOutSamples= kSampleRate * 70   / 1000;
+
+    QByteArray chunk(kChunkSamples * 2, 0);
+    qint16 *out = reinterpret_cast<qint16 *>(chunk.data());
+
+    for (int i = 0; i < kChunkSamples; ++i) {
+        const int pos = (m_ringSamplePos + i) % kCycleSamples;
+
+        int burstStart = -1, burstLen = 0;
+        if (pos < kBurst1End) {
+            burstStart = 0; burstLen = kBurst1End;
+        } else if (pos >= kBurst2Start && pos < kBurst2End) {
+            burstStart = kBurst2Start; burstLen = kBurst2End - kBurst2Start;
+        }
+
+        if (burstStart >= 0) {
+            const double t = static_cast<double>(pos) / kSampleRate;
+            double s = 0.22 * std::sin(2 * M_PI * 440.0 * t)
+                     + 0.22 * std::sin(2 * M_PI * 480.0 * t);
+            const int posInBurst = pos - burstStart;
+            double env = 1.0;
+            if (posInBurst < kFadeInSamples)
+                env = static_cast<double>(posInBurst) / kFadeInSamples;
+            else if (posInBurst > burstLen - kFadeOutSamples)
+                env = qMax(0.0, static_cast<double>(burstLen - posInBurst) / kFadeOutSamples);
+            out[i] = static_cast<qint16>(qBound(-32768.0, s * env * 32767.0, 32767.0));
+        }
+        // else: silence (already 0)
+    }
+
+    m_ringSamplePos = (m_ringSamplePos + kChunkSamples) % kCycleSamples;
+    m_ringtoneBuffer->push(chunk);
+}

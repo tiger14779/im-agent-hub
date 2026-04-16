@@ -12,6 +12,7 @@
 #include <QStringList>
 #include <QByteArray>
 #include <QMutex>
+#include <QTimer>
 #include <QtQml/qqmlregistration.h>
 
 /**
@@ -80,6 +81,8 @@ public:
                            const QString &outputId = {});
     Q_INVOKABLE void stop();
     Q_INVOKABLE void setMuted(bool muted);
+    Q_INVOKABLE void playRingtone();
+    Q_INVOKABLE void stopRingtone();
 
 signals:
     void activeChanged();
@@ -94,6 +97,7 @@ private slots:
     void onWsError(QAbstractSocket::SocketError err);
     void onCaptureReady();
     void onAudioFrame(const QByteArray &data);
+    void onRingtoneTick();
 
 private:
     static QAudioFormat audioFormat();
@@ -107,11 +111,17 @@ private:
     QAudioSource     *m_source          = nullptr;
     QAudioSink       *m_sink            = nullptr;
     QIODevice        *m_captureDevice   = nullptr;
-    AudioRingBuffer  *m_ringBuffer      = nullptr;  // sink pull 模式的数据源
+    AudioRingBuffer  *m_ringBuffer      = nullptr;
     bool              m_active          = false;
     bool              m_muted           = false;
     QAudioFormat      m_captureFormat;
     QAudioFormat      m_playbackFormat;
+
+    // 铃声合成
+    QAudioSink       *m_ringtoneSink    = nullptr;
+    AudioRingBuffer  *m_ringtoneBuffer  = nullptr;
+    QTimer           *m_ringtoneTimer   = nullptr;
+    int               m_ringSamplePos   = 0;
 };
 
 #endif // AUDIOCALLENGINE_H

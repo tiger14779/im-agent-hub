@@ -35,23 +35,15 @@ Item {
         target: AudioCallEngine
         function onPeerSpeaking(speaking) { root._speaking = speaking }
     }
-    // ── Ringtone ──────────────────────────────────────────────────────────
-
-    SoundEffect {
-        id: ringtoneEffect
-        source: "qrc:/ImAgentHub/resources/notify.wav"
-        volume: 0.75
+    // ── 来电铃声（由 AudioCallEngine C++ 合成，仅来电时播放）────────────────────
+    onPhaseChanged: {
+        if (phase === "incoming") {
+            AudioCallEngine.playRingtone()
+        } else {
+            AudioCallEngine.stopRingtone()
+        }
     }
 
-    // Play immediately when phase enters incoming/outgoing; repeat every 2.2s
-    Timer {
-        id: ringtoneTimer
-        interval: 2200
-        repeat: true
-        running: (root.phase === "incoming" || root.phase === "outgoing") && root.statusMsg.length === 0
-        onRunningChanged: if (running) ringtoneEffect.play()
-        onTriggered: ringtoneEffect.play()
-    }
     // ── Timers ────────────────────────────────────────────────────────
 
     // Auto-close popup after reject/busy hint
@@ -399,8 +391,7 @@ Item {
     function reset() {
         autoCloseTimer.stop()
         outgoingTimeoutTimer.stop()
-        ringtoneTimer.stop()
-        ringtoneEffect.stop()
+        AudioCallEngine.stopRingtone()
         durationTimer.stop()
         AudioCallEngine.stop()
         phase     = "idle"
