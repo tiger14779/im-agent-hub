@@ -2,6 +2,7 @@
 #define AUDIOCALLENGINE_H
 
 #include <QObject>
+#include <QIODevice>
 #include <QWebSocket>
 #include <QAudioSource>
 #include <QAudioSink>
@@ -9,7 +10,34 @@
 #include <QAudioDevice>
 #include <QMediaDevices>
 #include <QStringList>
+#include <QByteArray>
+#include <QMutex>
 #include <QtQml/qqmlregistration.h>
+
+/**
+ * @brief 线程安全的环形缓冲区，供 QAudioSink pull 模式使用。
+ *
+ * QAudioSink 以 pull 模式从此 device 读取数据：
+ *   - 有数据时正常返回；
+ *   - 缓冲不足时填充静音（0），避免爆音/噪音。
+ */
+class AudioRingBuffer : public QIODevice
+{
+    Q_OBJECT
+public:
+    explicit AudioRingBuffer(QObject *parent = nullptr);
+    void push(const QByteArray &data);  // 从网络线程写入
+    bool isReady() const { return true; }
+
+protected:
+    qint64 readData(char *data, qint64 maxSize) override;
+    qint64 writeData(const char *data, qint64 maxSize) override;
+
+private:
+    mutable QMutex m_mutex;
+    QByteArray     m_buf;
+    static constexpr int kMaxBufBytes = 192000; // 约 0.5s @ 48kHz Float32 双声道
+};
 
 /**
  * @brief 纯 WebSocket PCM 音频通话引擎
@@ -39,21 +67,9 @@ public:
     bool isActive() const { return m_active; }
     bool isMuted()  const { return m_muted;  }
 
-    /** 返回输入设备描述列表（索引对应 inputDeviceIds() 中的设备 ID） */
     QStringList inputDevices()  const;
-    /** 返回输出设备描述列表 */
     QStringList outputDevices() const;
 
-    /**
-     * @brief 启动通话
-     * @param wsBase   中继服务器基础地址（空 = 使用主 WS 服务器的 /api/call/audio，
-     *                 否则为完整的 wss:// 地址）
-     * @param serverBaseUrl  主 WS 服务器地址（wsBase 为空时用于构造完整 URL）
-     * @param roomId   房间 ID
-     * @param token    HMAC 鉴权 Token
-     * @param inputId  输入设备 ID（空 = 默认设备）
-     * @param outputId 输出设备 ID（空 = 默认设备）
-     */
     Q_INVOKABLE void start(const QString &wsBase, const QString &serverBaseUrl,
                            const QString &roomId, const QString &token,
                            const QString &inputId  = {},
@@ -66,7 +82,6 @@ signals:
     void mutedChanged();
     void devicesChanged();
     void errorOccurred(const QString &msg);
-    /** 对端是否正在发言（基于简单 RMS 阈值） */
     void peerSpeaking(bool speaking);
 
 private slots:
@@ -77,32 +92,23 @@ private slots:
     void onAudioFrame(const QByteArray &data);
 
 private:
-    /** 返回统一的 8kHz/Int16/单声道 格式（协议线上格式） */
     static QAudioFormat audioFormat();
-    /** 计算 PCM16 帧的 RMS 值（用于 VAD） */
     static qint16 rms(const QByteArray &pcm16);
-    /** 根据 wsBase 和 serverBaseUrl 构造完整的 wss:// URL */
     static QString buildUrl(const QString &wsBase, const QString &serverBaseUrl,
                             const QString &roomId, const QString &token);
-    /**
-     * 将任意采集格式的 PCM 转换为协议线上格式（8kHz Int16 单声道）。
-     * 支持多声道混合、样本格式转换（UInt8/Int16/Int32/Float）、线性插值重采样。
-     */
     static QByteArray convertToWire(const QByteArray &raw, const QAudioFormat &src);
-    /**
-     * 将协议线上格式（8kHz Int16 单声道）转换为播放设备所需的任意格式。
-     */
     static QByteArray convertFromWire(const QByteArray &wire, const QAudioFormat &dst);
 
-    QWebSocket    m_ws;
-    QAudioSource *m_source          = nullptr;
-    QAudioSink   *m_sink            = nullptr;
-    QIODevice    *m_captureDevice   = nullptr;
-    QIODevice    *m_playbackDevice  = nullptr;
-    bool          m_active          = false;
-    bool          m_muted           = false;
-    QAudioFormat  m_captureFormat;   // 实际采集格式（可能与协议格式不同）
-    QAudioFormat  m_playbackFormat;  // 实际播放格式（可能与协议格式不同）
+    QWebSocket        m_ws;
+    QAudioSource     *m_source          = nullptr;
+    QAudioSink       *m_sink            = nullptr;
+    QIODevice        *m_captureDevice   = nullptr;
+    AudioRingBuffer  *m_ringBuffer      = nullptr;  // sink pull 模式的数据源
+    bool              m_active          = false;
+    bool              m_muted           = false;
+    QAudioFormat      m_captureFormat;
+    QAudioFormat      m_playbackFormat;
 };
 
 #endif // AUDIOCALLENGINE_H
+

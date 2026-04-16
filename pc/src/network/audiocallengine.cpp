@@ -3,7 +3,49 @@
 #include <QDebug>
 #include <QUrl>
 #include <QVector>
+#include <QMutexLocker>
 #include <cmath>
+#include <cstring>
+
+// ── AudioRingBuffer ──────────────────────────────────────────────────────────
+
+AudioRingBuffer::AudioRingBuffer(QObject *parent)
+    : QIODevice(parent)
+{
+    open(QIODevice::ReadOnly);
+}
+
+void AudioRingBuffer::push(const QByteArray &data)
+{
+    QMutexLocker lock(&m_mutex);
+    // 缓冲过多时丢弃最旧的数据，防止延迟累积
+    if (m_buf.size() + data.size() > kMaxBufBytes) {
+        const int drop = m_buf.size() + data.size() - kMaxBufBytes;
+        m_buf.remove(0, drop);
+    }
+    m_buf.append(data);
+}
+
+qint64 AudioRingBuffer::readData(char *data, qint64 maxSize)
+{
+    QMutexLocker lock(&m_mutex);
+    if (m_buf.isEmpty()) {
+        // 缓冲为空时填静音，避免爆音
+        std::memset(data, 0, static_cast<size_t>(maxSize));
+        return maxSize;
+    }
+    const qint64 n = qMin(maxSize, static_cast<qint64>(m_buf.size()));
+    std::memcpy(data, m_buf.constData(), static_cast<size_t>(n));
+    m_buf.remove(0, static_cast<int>(n));
+    if (n < maxSize)
+        std::memset(data + n, 0, static_cast<size_t>(maxSize - n));
+    return maxSize; // 始终返回 maxSize，让 sink 以稳定速率运转
+}
+
+qint64 AudioRingBuffer::writeData(const char *, qint64)
+{
+    return 0; // 只读 device，不支持写
+}
 
 // ── AudioCallEngine ──────────────────────────────────────────────────────────
 
@@ -274,15 +316,16 @@ void AudioCallEngine::start(const QString &wsBase, const QString &serverBaseUrl,
     }
     connect(m_captureDevice, &QIODevice::readyRead, this, &AudioCallEngine::onCaptureReady);
 
-    // 启动音频播放
+    // 启动音频播放（pull 模式：sink 主动从环形缓冲区拉数据，避免 push 模式下的缓冲堆积/爆音）
+    m_ringBuffer = new AudioRingBuffer(this);
     m_sink = new QAudioSink(outputDev, playbackFormat, this);
-    m_playbackDevice = m_sink->start();
-    if (!m_playbackDevice) {
-        emit errorOccurred(QStringLiteral("扬声器启动失败"));
-        m_source->stop(); delete m_source; m_source = nullptr;
-        delete m_sink; m_sink = nullptr;
-        return;
-    }
+    // 设置合适的缓冲大小：约 80ms，减少延迟
+    const int bufBytes = static_cast<int>(playbackFormat.sampleRate()
+                                          * playbackFormat.channelCount()
+                                          * bytesPerSample(playbackFormat.sampleFormat())
+                                          * 0.08); // 80ms
+    if (bufBytes > 0) m_sink->setBufferSize(bufBytes);
+    m_sink->start(m_ringBuffer); // pull 模式：传入 QIODevice*
 
     // 连接 WebSocket
     const QString url = buildUrl(wsBase, serverBaseUrl, roomId, token);
@@ -309,7 +352,10 @@ void AudioCallEngine::stop()
         m_sink->stop();
         delete m_sink;
         m_sink = nullptr;
-        m_playbackDevice = nullptr;
+    }
+    if (m_ringBuffer) {
+        delete m_ringBuffer;
+        m_ringBuffer = nullptr;
     }
 
     m_active = false;
@@ -372,14 +418,14 @@ void AudioCallEngine::onAudioFrame(const QByteArray &data)
     // 简单 VAD：基于原始 8kHz Int16 数据计算 RMS
     emit peerSpeaking(rms(data) > 500);
 
-    if (!m_playbackDevice || data.isEmpty()) return;
+    if (!m_ringBuffer || data.isEmpty()) return;
 
-    // 如果播放格式已是协议格式则直接写入；否则转换
+    // 转换后推入环形缓冲区（sink 以 pull 模式自行拉取）
     const QAudioFormat wire = audioFormat();
     if (m_playbackFormat == wire) {
-        m_playbackDevice->write(data);
+        m_ringBuffer->push(data);
     } else {
         const QByteArray converted = convertFromWire(data, m_playbackFormat);
-        if (!converted.isEmpty()) m_playbackDevice->write(converted);
+        if (!converted.isEmpty()) m_ringBuffer->push(converted);
     }
 }
