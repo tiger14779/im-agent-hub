@@ -339,9 +339,16 @@ Item {
 
     WebEngineView {
         id: callWebView
-        x: -4; y: -4; width: 2; height: 2
+        // Keep inside the visible window area so Chromium does NOT treat this
+        // as an off-screen renderer (off-screen renderers have audio throttled).
+        // 1x1 pixel in the top-left corner, completely invisible to the user.
+        x: 0; y: 0; width: 1; height: 1
         settings.localContentCanAccessRemoteUrls: true
         settings.localContentCanAccessFileUrls:  true
+        // Allow media elements to autoplay without a prior user gesture
+        settings.playbackRequiresUserGesture: false
+        // Allow WebRTC
+        settings.webRTCPublicInterfacesOnly: false
 
         onFeaturePermissionRequested: function(securityOrigin, feature) {
             if (feature === WebEngineView.MediaAudioCapture)

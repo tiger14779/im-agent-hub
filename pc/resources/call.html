@@ -86,9 +86,29 @@ if (!token || !wsUrl) {
       if (track.kind === 'audio') {
         var el = track.attach();
         el.autoplay = true;
+        el.volume = 1.0;
         document.body.appendChild(el);
+        // Explicitly call play() — dynamically-created audio elements may
+        // not start via autoplay attribute alone in embedded WebViews.
+        el.play().then(function() {
+          report('audio', 'playing');
+        }).catch(function(e) {
+          report('audio', 'play-blocked:' + (e && e.name ? e.name : 'unknown'));
+          // Retry once after a short delay
+          setTimeout(function() {
+            el.play().then(function() {
+              report('audio', 'play-retry-ok');
+            }).catch(function(e2) {
+              report('audio', 'play-retry-fail:' + (e2 && e2.name ? e2.name : 'unknown'));
+            });
+          }, 500);
+        });
         ensureAudio();
         report('audio', 'subscribed');
+        // Report AudioContext state for diagnostics
+        if (room.audioContext) {
+          report('audioCtx-state', room.audioContext.state);
+        }
       }
     });
 
