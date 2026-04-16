@@ -211,10 +211,16 @@ async function joinLiveKit(token: string, wsUrl: string) {
         const el = track.attach() as HTMLAudioElement
         el.autoplay = true
         document.body.appendChild(el)
+        // Resume AudioContext if suspended (required on mobile/some browsers)
+        lkRoom.startAudio().catch(() => {})
       }
     })
     lkRoom.on(RoomEvent.TrackUnsubscribed, (track: any) => {
       track.detach()
+    })
+    // Retry AudioContext resume if it gets suspended after playback starts
+    lkRoom.on(RoomEvent.AudioPlaybackStatusChanged, () => {
+      if (!lkRoom.canPlaybackAudio) lkRoom.startAudio().catch(() => {})
     })
 
     await lkRoom.connect(wsUrl, token)

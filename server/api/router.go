@@ -1,6 +1,9 @@
 package api
 
 import (
+	"net/http"
+	"path/filepath"
+
 	"im-agent-hub/service"
 
 	"github.com/gin-contrib/cors"
@@ -49,6 +52,18 @@ func SetupRouter(
 
 	// Admin auth (no JWT required)
 	r.POST("/api/admin/auth/login", AdminLogin())
+
+	// Serve livekit-client ESM bundle (built by H5 Vite, served locally to avoid CDN blocks)
+	r.GET("/lk.js", func(c *gin.Context) {
+		matches, err := filepath.Glob("./static/h5/assets/livekit-client*.js")
+		if err != nil || len(matches) == 0 {
+			c.JSON(http.StatusNotFound, gin.H{"error": "livekit-client bundle not found"})
+			return
+		}
+		c.Header("Content-Type", "application/javascript; charset=utf-8")
+		c.Header("Cache-Control", "max-age=3600")
+		c.File(matches[0])
+	})
 
 	// File upload/download (local storage, bypasses unresolvable MinIO hostname)
 	r.POST("/api/upload", UploadFile())

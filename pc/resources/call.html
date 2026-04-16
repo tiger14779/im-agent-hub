@@ -26,7 +26,11 @@ document.addEventListener('DOMContentLoaded', function() {
     return;
   }
 
-  import('https://cdn.jsdelivr.net/npm/livekit-client@2/+esm')
+  // Use server-hosted bundle (avoids CDN blocks in China).
+  // Falls back to CDN if server URL is not injected.
+  var lkSrc = window.__livekitSrc || 'https://cdn.jsdelivr.net/npm/livekit-client@2/+esm';
+
+  import(lkSrc)
     .then(function(mod) {
       var Room      = mod.Room;
       var RoomEvent = mod.RoomEvent;

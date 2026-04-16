@@ -408,6 +408,7 @@ Item {
                 + ';window.__callWsUrl=' + JSON.stringify(realWsUrl)
                 + ';window.__callPeer='  + JSON.stringify(peer)
                 + ';window.__callMyId='  + JSON.stringify(myid)
+                + ';window.__livekitSrc=' + JSON.stringify(HttpClient.baseUrl + '/lk.js')
                 + ';<\/script>'
             html = html.replace('<head>', '<head>' + inj)
             callWebView.loadHtml(html, 'http://localhost:8888/')
