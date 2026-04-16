@@ -764,14 +764,16 @@ Page {
         function onCallRejected(fromId) {
             if (voiceCallWindow.peerId === fromId) {
                 voiceCallWindow.statusMsg = "对方拒绝接听"
-                voiceCallWindow.autoCloseTimer.start()
+                voiceCallWindow.autoCloseTimer.restart()
+                voiceCallWindow.outgoingTimeoutTimer.stop()
             }
         }
 
         function onCallBusy(fromId) {
             if (voiceCallWindow.peerId === fromId) {
                 voiceCallWindow.statusMsg = "对方忙线，请稍后再试"
-                voiceCallWindow.autoCloseTimer.start()
+                voiceCallWindow.autoCloseTimer.restart()
+                voiceCallWindow.outgoingTimeoutTimer.stop()
             }
         }
 

@@ -41,8 +41,14 @@ Item {
     Timer {
         id: autoCloseTimer
         interval: 2500; repeat: false
-        onTriggered: root.reset()
+        onTriggered: {
+            outgoingTimeoutTimer.stop()  // 确保呼出计时器不会再触发
+            root.reset()
+        }
     }
+
+    // 暴露给外部使用（ChatPage 可将其 stop）
+    property alias outgoingTimeoutTimer: outgoingTimeoutTimer
 
     // No-answer timeout for outgoing calls (30s)
     Timer {
@@ -188,6 +194,21 @@ Item {
                     MouseArea { anchors.fill: parent; onClicked: root.callEnded() }
                 }
                 Label { text: "\u53d6\u6d88"; color: "#9ca3af"; font.pixelSize: 12; Layout.alignment: Qt.AlignHCenter }
+            }
+
+            // Status hint (reject/busy/no-answer): show a close button immediately
+            ColumnLayout {
+                Layout.alignment: Qt.AlignHCenter
+                spacing: 8
+                visible: root.statusMsg.length > 0
+
+                Rectangle {
+                    width: 64; height: 64; radius: 32; color: "#6b7280"
+                    Layout.alignment: Qt.AlignHCenter
+                    Label { anchors.centerIn: parent; text: "\u2715"; font.pixelSize: 26; color: "white" }
+                    MouseArea { anchors.fill: parent; onClicked: { autoCloseTimer.stop(); outgoingTimeoutTimer.stop(); root.reset() } }
+                }
+                Label { text: "\u5173\u95ed"; color: "#9ca3af"; font.pixelSize: 12; Layout.alignment: Qt.AlignHCenter }
             }
         }
     }
