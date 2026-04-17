@@ -14,6 +14,9 @@ Item {
     property int contentType: 101      // 消息类型: 101=文本, 102=图片, 103=语音, 105=文件
     property string textContent: ""    // 文本内容
     property string imageUrl: ""       // 图片/文件/语音URL
+    // 稳定的图片URL：只在收到非空值时更新，防止 status role 变化时反复重加载
+    property string _stableImageUrl: ""
+    onImageUrlChanged: { if (imageUrl.length > 0) _stableImageUrl = imageUrl }
     property string fileName: ""       // 文件名
     property real fileSize: 0          // 文件大小（字节）
     property int voiceDuration: 0      // 语音时长（秒）
@@ -219,7 +222,7 @@ Item {
                 Component {
                     id: imageComponent
                     Image {
-                        source: imageUrl
+                        source: bubble._stableImageUrl
                         fillMode: Image.PreserveAspectFit
                         width: Math.min(Math.max(sourceSize.width, 60), 220)
                         height: sourceSize.width > 0
