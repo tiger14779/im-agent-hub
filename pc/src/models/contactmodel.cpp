@@ -71,8 +71,9 @@ void ContactModel::loadFromJson(const QJsonArray &arr, bool isGroup)
         }
         m_contacts.append(c);
     }
-    // 按最后消息时间降序排列（有消息的在前，无消息的在后）
+    // 群组始终置顶，群组内部 / 非群组内部再按最后消息时间降序
     std::stable_sort(m_contacts.begin(), m_contacts.end(), [](const Contact &a, const Contact &b) {
+        if (a.isGroup != b.isGroup) return a.isGroup > b.isGroup;
         return a.lastTime > b.lastTime;
     });
     rebuildFilter();
@@ -180,13 +181,24 @@ void ContactModel::updateLastMessage(const QString &userId, const QString &text,
     int fRow = filteredRow(idx);
     if (fRow < 0) return;
 
-    // 将该联系人移到列表顶部（不影响 activeUserId 选中状态）
-    if (fRow > 0) {
-        beginMoveRows(QModelIndex(), fRow, fRow, QModelIndex(), 0);
-        m_filteredIndices.move(fRow, 0);
+    // 群组始终置顶：移动目标位置 = 0（群）或群组区块结束后的第一行（非群）
+    bool isGrp = m_contacts[idx].isGroup;
+    int targetRow = 0;
+    if (!isGrp) {
+        // 跳过所有群组行
+        for (int i = 0; i < m_filteredIndices.size(); ++i) {
+            if (m_contacts[m_filteredIndices[i]].isGroup)
+                targetRow = i + 1;
+            else
+                break;
+        }
+    }
+    if (fRow > targetRow) {
+        beginMoveRows(QModelIndex(), fRow, fRow, QModelIndex(), targetRow);
+        m_filteredIndices.move(fRow, targetRow);
         endMoveRows();
     }
-    QModelIndex mi = index(0);
+    QModelIndex mi = index(targetRow);
     emit dataChanged(mi, mi, { LastMessageRole, LastTimeRole });
 }
 
