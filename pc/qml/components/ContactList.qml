@@ -178,23 +178,29 @@ ListView {
                             font.bold: true
                         }
                     }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 4
+
+                    Label {
+                        text: lastMessage || ""
+                        color: "#999"
+                        font.pixelSize: 12
+                        elide: Text.ElideRight
+                        maximumLineCount: 1
+                        Layout.fillWidth: true
+                        visible: (lastMessage || "").length > 0
+                    }
 
                     Label {
                         text: lastTime > 0 ? formatTime(lastTime) : ""
                         color: "#b0b0b0"
-                        font.pixelSize: 10
+                        font.pixelSize: 9
                         visible: text.length > 0
+                        Layout.alignment: Qt.AlignVCenter
                     }
-                }
-
-                Label {
-                    text: lastMessage || ""
-                    color: "#999"
-                    font.pixelSize: 12
-                    elide: Text.ElideRight
-                    maximumLineCount: 1
-                    Layout.fillWidth: true
-                    visible: text.length > 0
                 }
             }
         }
@@ -210,15 +216,13 @@ ListView {
         }
     }
 
-    // 格式化时间：今天显示 HH:mm，其他显示 M/D
+    // 格式化时间：完整日期+时间，格式 M/D HH:mm
     function formatTime(ts) {
         var d = new Date(ts)
-        var now = new Date()
-        if (d.toDateString() === now.toDateString()) {
-            return d.getHours().toString().padStart(2, '0') + ":" +
-                   d.getMinutes().toString().padStart(2, '0')
-        }
-        return (d.getMonth() + 1) + "/" + d.getDate()
+        var dateStr = (d.getMonth() + 1) + "/" + d.getDate()
+        var timeStr = d.getHours().toString().padStart(2, '0') + ":" +
+                      d.getMinutes().toString().padStart(2, '0')
+        return dateStr + " " + timeStr
     }
 
     function statusText(status) {

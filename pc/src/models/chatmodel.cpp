@@ -5,6 +5,7 @@
 #include <QJsonArray>
 #include <QFile>
 #include <QUrl>
+#include <algorithm>
 
 ChatModel::ChatModel(QObject *parent)
     : QAbstractListModel(parent)
@@ -117,6 +118,10 @@ void ChatModel::prependMessages(const QJsonArray &msgs)
             newMsgs.append(cm);
     }
     if (newMsgs.isEmpty()) return;
+    // 按 sendTime 升序排序，确保历史消息顺序正确
+    std::sort(newMsgs.begin(), newMsgs.end(), [](const ChatMessage &a, const ChatMessage &b) {
+        return a.sendTime < b.sendTime;
+    });
     beginInsertRows(QModelIndex(), 0, newMsgs.size() - 1);
     for (int i = newMsgs.size() - 1; i >= 0; --i) {
         m_idSet.insert(newMsgs[i].clientMsgID);
@@ -191,6 +196,10 @@ void ChatModel::replaceAll(const QJsonArray &msgs)
     newList.reserve(msgs.size());
     for (const auto &val : msgs)
         newList.append(fromJson(val.toObject()));
+    // 按 sendTime 升序排序，确保消息顺序正确
+    std::sort(newList.begin(), newList.end(), [](const ChatMessage &a, const ChatMessage &b) {
+        return a.sendTime < b.sendTime;
+    });
 
     const int oldSize = m_messages.size();
     const int newSize = newList.size();

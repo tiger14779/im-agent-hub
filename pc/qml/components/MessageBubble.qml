@@ -498,10 +498,12 @@ Item {
         return (bytes / 1024 / 1024).toFixed(1) + " MB"
     }
 
-    // 格式化消息时间（HH:mm）
+    // 格式化消息时间：完整日期+时间，格式 M/D HH:mm
     function formatMsgTime(ts) {
         var d = new Date(ts)
-        return d.getHours().toString().padStart(2, '0') + ":" +
-               d.getMinutes().toString().padStart(2, '0')
+        var dateStr = (d.getMonth() + 1) + "/" + d.getDate()
+        var timeStr = d.getHours().toString().padStart(2, '0') + ":" +
+                      d.getMinutes().toString().padStart(2, '0')
+        return dateStr + " " + timeStr
     }
 }
