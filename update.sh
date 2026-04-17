@@ -87,7 +87,69 @@ if command -v nginx &>/dev/null; then
         PORT=$(grep -oP '(?<=proxy_pass http://127\.0\.0\.1:)\d+' "/etc/nginx/sites-available/${DOMAIN}" 2>/dev/null | head -1)
         PORT="${PORT:-8080}"
         info "检测到 Nginx 站点: ${DOMAIN}（后端端口 ${PORT}），更新配置..."
-        cat > "/etc/nginx/sites-available/${DOMAIN}" <<NGINXEOF
+
+        # 判断是否已有 SSL 证书，直接写入对应配置，避免依赖 certbot --reinstall
+        if [ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]; then
+            info "检测到 SSL 证书，写入 HTTP + HTTPS 完整配置..."
+            cat > "/etc/nginx/sites-available/${DOMAIN}" <<NGINXEOF
+server {
+    listen 80;
+    server_name ${DOMAIN} www.${DOMAIN};
+    return 301 https://\$host\$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name ${DOMAIN} www.${DOMAIN};
+
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    include             /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam         /etc/letsencrypt/ssl-dhparams.pem;
+
+    client_max_body_size 50m;
+
+    location / {
+        proxy_pass http://127.0.0.1:${PORT};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    location /api/ws {
+        proxy_pass http://127.0.0.1:${PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_read_timeout 86400s;
+    }
+
+    location /api/service/ws {
+        proxy_pass http://127.0.0.1:${PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_read_timeout 86400s;
+    }
+
+    location /api/call/audio {
+        proxy_pass http://127.0.0.1:${PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_read_timeout 86400s;
+    }
+}
+NGINXEOF
+        else
+            cat > "/etc/nginx/sites-available/${DOMAIN}" <<NGINXEOF
 server {
     listen 80;
     server_name ${DOMAIN} www.${DOMAIN};
@@ -133,12 +195,6 @@ server {
     }
 }
 NGINXEOF
-        # 保留 certbot 写入的 SSL 段（如果证书存在则让 certbot 重新注入）
-        if [ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]; then
-            info "检测到 SSL 证书，重新注入 HTTPS 配置..."
-            certbot --nginx -d "${DOMAIN}" -d "www.${DOMAIN}" --non-interactive --reinstall 2>&1 | tail -3 || \
-            certbot --nginx -d "${DOMAIN}" --non-interactive --reinstall 2>&1 | tail -3 || \
-            warn "certbot 重新注入失败，请手动运行: certbot --nginx -d ${DOMAIN} --reinstall"
         fi
         if nginx -t 2>/dev/null; then
             systemctl reload nginx
