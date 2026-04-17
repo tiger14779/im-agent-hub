@@ -413,13 +413,6 @@ function selectConversation(id: string, name: string, isGroup: boolean) {
   if (!isGroup) chatWs.markRead(id)
 }
 
-function goBackToList() {
-  activeConversation.value = ''
-  activeConversationName.value = ''
-  activeConversationIsGroup.value = false
-  chatStore.clearMessages()
-}
-
 // 打开群聊（点击群横幅卡片）
 function openGroupChat(g: { groupId: string; name: string }) {
   selectConversation(g.groupId, g.name, true)

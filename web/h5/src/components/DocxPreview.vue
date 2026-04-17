@@ -53,7 +53,7 @@ function close() {
 }
 
 // Handle browser back button (Android)
-function onPopState(e: PopStateEvent) {
+function onPopState(_e: PopStateEvent) {
   if (props.visible) {
     historyPushed.value = false
     emit('close')
