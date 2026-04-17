@@ -135,7 +135,10 @@ server {
 NGINXEOF
         # 保留 certbot 写入的 SSL 段（如果证书存在则让 certbot 重新注入）
         if [ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]; then
-            certbot install --nginx -d "${DOMAIN}" --reinstall --non-interactive 2>/dev/null || true
+            info "检测到 SSL 证书，重新注入 HTTPS 配置..."
+            certbot --nginx -d "${DOMAIN}" -d "www.${DOMAIN}" --non-interactive --reinstall 2>&1 | tail -3 || \
+            certbot --nginx -d "${DOMAIN}" --non-interactive --reinstall 2>&1 | tail -3 || \
+            warn "certbot 重新注入失败，请手动运行: certbot --nginx -d ${DOMAIN} --reinstall"
         fi
         if nginx -t 2>/dev/null; then
             systemctl reload nginx
