@@ -112,6 +112,7 @@ let playbackCursor = 0 // scheduled playback cursor - keeps frames contiguous, n
 let ringtoneCtx: AudioContext | null = null
 let ringtoneTimer: ReturnType<typeof setTimeout> | null = null
 let ringtoneRunning = false
+let pendingCallReady: CallAudioReadyData | null = null // 缓存 call_audio_ready，WS 重连后可重试
 
 // ── 来电提示音（双振荡器 + 颤音，模拟真实电话铃声）─────────────────
 function ringBurst(ctx: AudioContext, t: number) {
@@ -331,8 +332,18 @@ chatWs.onCallBusy = (_data: CallSignalData) => {
 // 服务端下发音频中继凭证（主叫和被叫都会收到）
 chatWs.onCallAudioReady = (data: CallAudioReadyData) => {
   if (phase.value !== 'outgoing' && phase.value !== 'incoming' && phase.value !== 'connecting') return
+  pendingCallReady = data // 缓存，防止 WS 重连时消息丢失
   // phase → active 由 connectAudioWs 内部在音频图就绪后设置
   connectAudioWs(data.wsBase, data.roomId, data.token)
+}
+
+// WS 重连后：若还在通话流程中且尚未建立音频，用缓存的凭证重试
+chatWs.onReconnected = () => {
+  if (pendingCallReady && !audioWs &&
+      (phase.value === 'outgoing' || phase.value === 'incoming' || phase.value === 'connecting')) {
+    console.log('[VoiceCall] WS reconnected during call, retrying audio WS with cached credentials')
+    connectAudioWs(pendingCallReady.wsBase, pendingCallReady.roomId, pendingCallReady.token)
+  }
 }
 
 // 对方接听（呼出时服务端会同时下发 call_accept + call_audio_ready）
@@ -395,6 +406,7 @@ function toggleMute() {
 
 // ── 结束通话清理 ──────────────────────────────────────────────────
 function endCall() {
+  pendingCallReady = null // 清除缓存的音频凭证
   stopRingtone()
   if (audioWs) { audioWs.onclose = null; audioWs.close(); audioWs = null }
   if (captureStream) { captureStream.getTracks().forEach(t => t.stop()); captureStream = null }

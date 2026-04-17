@@ -137,7 +137,7 @@ func HandleAudioWS(c *gin.Context) {
 		case peer := <-w.peerCh:
 			log.Printf("[AudioRelay] room %s: peer arrived, starting relay", roomID)
 			relayAudio(conn, peer)
-		case <-time.After(30 * time.Second):
+		case <-time.After(60 * time.Second):
 			// No peer within 30s - clean up and close
 			audioRoomsMu.Lock()
 			if audioRooms[roomID] == w {
