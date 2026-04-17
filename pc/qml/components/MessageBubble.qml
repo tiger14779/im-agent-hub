@@ -195,10 +195,10 @@ Item {
                             globalSaveDialog.open()
                         }
                     }
-                    MenuSeparator { visible: isSelf && serverMsgId.length > 0 }
+                    MenuSeparator { visible: (isSelf || isGroup) && serverMsgId.length > 0 }
                     MenuItem {
                         text: "\u5220\u9664"
-                        visible: isSelf && serverMsgId.length > 0
+                        visible: (isSelf || isGroup) && serverMsgId.length > 0
                         height: visible ? implicitHeight : 0
                         onTriggered: {
                             bubble.deleteRequested(serverMsgId, clientMsgId)

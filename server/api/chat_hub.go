@@ -559,7 +559,7 @@ func (h *ChatHub) handleDeleteMessage(cc *ChatConn, data json.RawMessage) {
 		return
 	}
 
-	log.Printf("[WS] delete_message: %s deleted serverMsgID=%s", cc.userID, req.ServerMsgID)
+	log.Printf("[WS] delete_message: %s deleted serverMsgID=%s isGroup=%v", cc.userID, req.ServerMsgID, msg.IsGroup)
 
 	// ACK back to sender
 	h.sendToUser(cc.userID, map[string]interface{}{
@@ -569,17 +569,34 @@ func (h *ChatHub) handleDeleteMessage(cc *ChatConn, data json.RawMessage) {
 		},
 	})
 
-	// Notify the peer
-	peerID := msg.RecvID
-	if peerID == cc.userID {
-		peerID = msg.SendID
+	if msg.IsGroup {
+		// 群消息：广播 message_deleted 给所有群成员
+		var members []model.GroupMember
+		database.DB.Where("group_id = ?", msg.RecvID).Find(&members)
+		payload := map[string]interface{}{
+			"type": "message_deleted",
+			"data": map[string]interface{}{
+				"serverMsgId": req.ServerMsgID,
+			},
+		}
+		for _, m := range members {
+			if m.UserID != cc.userID {
+				go h.sendToUser(m.UserID, payload)
+			}
+		}
+	} else {
+		// 私聊消息：仅通知对方
+		peerID := msg.RecvID
+		if peerID == cc.userID {
+			peerID = msg.SendID
+		}
+		h.sendToUser(peerID, map[string]interface{}{
+			"type": "message_deleted",
+			"data": map[string]interface{}{
+				"serverMsgId": req.ServerMsgID,
+			},
+		})
 	}
-	h.sendToUser(peerID, map[string]interface{}{
-		"type": "message_deleted",
-		"data": map[string]interface{}{
-			"serverMsgId": req.ServerMsgID,
-		},
-	})
 }
 
 // sendJSON marshals v to JSON and queues it on the connection's write channel.
