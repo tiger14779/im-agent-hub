@@ -56,9 +56,10 @@ func ClientLogin(userSvc *service.UserService) gin.HandlerFunc {
 		var groupMembers []model.GroupMember
 		database.DB.Where("user_id = ?", user.ID).Find(&groupMembers)
 		type groupInfo struct {
-			GroupID string `json:"groupId"`
-			Name    string `json:"name"`
-			Avatar  string `json:"avatar"`
+			GroupID     string `json:"groupId"`
+			Name        string `json:"name"`
+			Avatar      string `json:"avatar"`
+			MemberCount int    `json:"memberCount"`
 		}
 		groupInfoList := make([]groupInfo, 0)
 		if len(groupMembers) > 0 {
@@ -69,7 +70,9 @@ func ClientLogin(userSvc *service.UserService) gin.HandlerFunc {
 			var userGroups []model.Group
 			database.DB.Where("id IN ? AND dissolved = ?", groupIDs, false).Find(&userGroups)
 			for _, g := range userGroups {
-				groupInfoList = append(groupInfoList, groupInfo{GroupID: g.ID, Name: g.Name, Avatar: g.Avatar})
+				var cnt int64
+				database.DB.Model(&model.GroupMember{}).Where("group_id = ?", g.ID).Count(&cnt)
+				groupInfoList = append(groupInfoList, groupInfo{GroupID: g.ID, Name: g.Name, Avatar: g.Avatar, MemberCount: int(cnt)})
 			}
 		}
 

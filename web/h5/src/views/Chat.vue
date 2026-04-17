@@ -17,82 +17,90 @@
       <button class="retry-btn" @click="init">重新连接</button>
     </div>
 
-    <!-- Chat UI (always rendered so transitions work) -->
+    <!-- Chat UI -->
     <template v-if="state === 'ready'">
+      <!-- Lottery result -->
+      <LotteryResult />
 
-      <!-- Conversation list (shown when user has groups and no active chat) -->
-      <template v-if="groups.length > 0 && !activeConversation">
-        <header class="chat-header">
-          <span class="title">消息</span>
-        </header>
-        <div class="user-list">
-          <!-- Service staff 1-on-1 -->
-          <div class="user-list-item" @click="selectConversation(serviceIdRef, serviceUserName, false)">
-            <div class="avatar">{{ serviceUserName.charAt(0) }}</div>
-            <div class="user-list-info">
-              <span class="user-list-name">{{ serviceUserName }}</span>
-              <span class="user-list-id">客服</span>
-            </div>
-          </div>
-          <!-- Groups -->
-          <div
-            v-for="g in groups"
-            :key="g.groupId"
-            class="user-list-item"
-            @click="selectConversation(g.groupId, g.name, true)"
-          >
-            <div class="avatar group-avatar">
-              <img v-if="g.avatar" :src="g.avatar" style="width:100%;height:100%;object-fit:cover;border-radius:inherit" />
-              <span v-else>群</span>
-            </div>
-            <div class="user-list-info">
-              <span class="user-list-name">{{ g.name }}</span>
-              <span class="user-list-id">群聊</span>
-            </div>
-          </div>
+      <!-- 群组入口横幅卡片（始终显示在开奖球下方） -->
+      <div v-if="firstGroup" class="group-entry-card" @click="openGroupChat(firstGroup)">
+        <div class="gec-avatar">
+          <img v-if="firstGroup.avatar" :src="firstGroup.avatar" class="gec-avatar-img" />
+          <span v-else class="gec-avatar-text">群</span>
         </div>
-      </template>
-
-      <!-- Active chat panel (shown when conversation is selected, or no groups) -->
-      <template v-if="activeConversation || groups.length === 0">
-        <!-- Lottery result -->
-        <LotteryResult />
-
-        <!-- Group banner notification -->
-        <div v-if="groupBanner" class="group-banner">
-          {{ groupBanner }}
+        <div class="gec-info">
+          <div class="gec-row1">
+            <span class="gec-name">{{ firstGroup.name }}</span>
+            <span class="gec-count">{{ firstGroup.memberCount }}人</span>
+            <span v-if="groupUnread > 0" class="gec-badge">{{ groupUnread > 99 ? '99+' : groupUnread }}</span>
+          </div>
+          <div class="gec-preview">{{ groupLastMsg || '点击进入群聊' }}</div>
         </div>
+        <span class="gec-arrow">›</span>
+      </div>
 
-        <!-- Header -->
-        <header class="chat-header">
-          <button class="back-btn" @click="groups.length > 0 ? goBackToList() : onBackClick()">‹</button>
-          <span class="title">{{ activeConversationName || serviceUserName }}</span>
-          <span class="more-btn">···</span>
-        </header>
+      <!-- 群组系统通知（被踢出/解散） -->
+      <div v-if="groupBanner" class="group-banner">
+        {{ groupBanner }}
+      </div>
 
-        <!-- Message list -->
-        <MessageList
-          :messages="chatStore.messages"
-          :my-id="userStore.userId"
-          :loading-more="loadingMore"
-          :has-more="chatStore.hasMore"
-          :staff-avatar="userStore.serviceAvatar"
-          :staff-name="userStore.serviceNickname"
-          :my-avatar="userStore.avatar"
-          @load-more="onLoadMore"
-        />
+      <!-- Header -->
+      <header class="chat-header">
+        <button v-if="activeConversationIsGroup" class="back-btn-large" @click="backToServiceChat">‹</button>
+        <button v-else class="back-btn" @click="onBackClick">‹</button>
+        <span class="title">{{ activeConversationName || serviceUserName }}</span>
+        <button v-if="activeConversationIsGroup" class="members-btn" @click="openMembersPanel" title="群成员">
+          <span class="members-icon">👥</span>
+        </button>
+        <span v-else class="more-btn">···</span>
+      </header>
 
-        <!-- Chat input -->
-        <ChatInput
-          :show-call="!activeConversationIsGroup"
-          @send-text="onSendText"
-          @send-image="onSendImage"
-          @send-file="onSendFile"
-          @send-voice="onSendVoice"
-          @start-call="onStartCall"
-        />
-      </template>
+      <!-- Message list -->
+      <MessageList
+        :messages="chatStore.messages"
+        :my-id="userStore.userId"
+        :loading-more="loadingMore"
+        :has-more="chatStore.hasMore"
+        :staff-avatar="userStore.serviceAvatar"
+        :staff-name="userStore.serviceNickname"
+        :my-avatar="userStore.avatar"
+        @load-more="onLoadMore"
+      />
+
+      <!-- Chat input -->
+      <ChatInput
+        :show-call="!activeConversationIsGroup"
+        @send-text="onSendText"
+        @send-image="onSendImage"
+        @send-file="onSendFile"
+        @send-voice="onSendVoice"
+        @start-call="onStartCall"
+      />
     </template>
+
+    <!-- 群成员面板 -->
+    <teleport to="body">
+      <transition name="slide-up">
+        <div v-if="showMembersPanel" class="members-overlay" @click.self="showMembersPanel = false">
+          <div class="members-panel">
+            <div class="members-panel-header">
+              <span class="members-panel-title">群成员 ({{ groupMembers.length }})</span>
+              <button class="members-panel-close" @click="showMembersPanel = false">✕</button>
+            </div>
+            <div v-if="membersLoading" class="members-loading">加载中...</div>
+            <div v-else class="members-grid">
+              <div v-for="m in groupMembers" :key="m.userId" class="member-item">
+                <div class="member-avatar">
+                  <img v-if="m.avatarUrl" :src="m.avatarUrl" class="member-avatar-img" />
+                  <span v-else class="member-avatar-text">{{ (m.nickname || m.userId).charAt(0) }}</span>
+                </div>
+                <span class="member-name">{{ m.nickname || m.userId }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </transition>
+    </teleport>
 
     <!-- Back confirm dialog -->
     <teleport to="body">
@@ -112,7 +120,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useChatStore } from '@/stores/chat'
@@ -140,11 +148,23 @@ const oldestSeq = ref(0)
 const groupBanner = ref('')   // 群组通知横幅（被踢出 / 群解散）
 
 // Conversation list (groups the user belongs to)
-const groups = ref<{ groupId: string; name: string; avatar: string }[]>([])
+const groups = ref<{ groupId: string; name: string; avatar: string; memberCount: number }[]>([])
 const activeConversation = ref('')           // '' = show list; otherwise = active peer ID
 const activeConversationName = ref('')
 const activeConversationIsGroup = ref(false)
 const voiceCallRef = ref<InstanceType<typeof VoiceCall> | null>(null)
+
+// 群未读计数 & 最后一条消息预览
+const groupUnread = ref(0)
+const groupLastMsg = ref('')
+
+// 群成员面板
+const showMembersPanel = ref(false)
+const membersLoading = ref(false)
+const groupMembers = ref<{ userId: string; nickname: string; avatarUrl: string; role: string }[]>([])
+
+// 只使用第一个群（业务约定只有一个群）
+const firstGroup = computed(() => groups.value[0] ?? null)
 
 let isSyncing = false // flag: true when reloading history after reconnect
 let pendingHistoryPeer = '' // race guard: expected peerUserId for the next history response
@@ -235,7 +255,7 @@ async function init() {
     serviceUserName.value = res.serviceNickname || '客服'
     const serviceId = userStore.serviceUserId || targetId
     serviceIdRef.value = serviceId
-    groups.value = res.groups || []
+    groups.value = (res.groups || []) as { groupId: string; name: string; avatar: string; memberCount: number }[]
 
     if (!userStore.token) {
       throw new Error('登录令牌缺失，请重新进入聊天链接')
@@ -254,6 +274,15 @@ async function init() {
     chatWs.onNewGroupMessage = (msg) => {
       if (activeConversationIsGroup.value && activeConversation.value === msg.groupId) {
         chatStore.addMessage(msg)
+      } else {
+        // 当前不在群聊中：增加未读 & 更新预览
+        groupUnread.value++
+        const senderPrefix = msg.senderName ? `${msg.senderName}: ` : ''
+        if (msg.contentType === 101) groupLastMsg.value = senderPrefix + (msg.textContent || '')
+        else if (msg.contentType === 102) groupLastMsg.value = senderPrefix + '[图片]'
+        else if (msg.contentType === 103) groupLastMsg.value = senderPrefix + '[语音]'
+        else if (msg.contentType === 105) groupLastMsg.value = senderPrefix + '[文件]'
+        else groupLastMsg.value = senderPrefix + '新消息'
       }
     }
 
@@ -284,7 +313,7 @@ async function init() {
         // Re-add the group to the list if it's not already there
         const alreadyListed = groups.value.some(g => g.groupId === gId)
         if (!alreadyListed) {
-          groups.value.push({ groupId: gId, name: gName || '群聊', avatar: '' })
+          groups.value.push({ groupId: gId, name: gName || '群聊', avatar: '', memberCount: 0 })
         }
       }
     }
@@ -349,16 +378,13 @@ async function init() {
 
     state.value = 'ready'
 
-    // 5. If no groups, open service staff chat directly; otherwise show list
-    if (groups.value.length === 0) {
-      activeConversation.value = serviceId
-      activeConversationName.value = serviceUserName.value
-      activeConversationIsGroup.value = false
-      pendingHistoryPeer = serviceId
-      chatWs.loadHistory(serviceId)
-      chatWs.markRead(serviceId)
-    }
-    // else: leave activeConversation empty so the list is shown
+    // 始终默认打开客服私聊
+    activeConversation.value = serviceId
+    activeConversationName.value = serviceUserName.value
+    activeConversationIsGroup.value = false
+    pendingHistoryPeer = serviceId
+    chatWs.loadHistory(serviceId)
+    chatWs.markRead(serviceId)
   } catch (err) {
     console.error('[Chat] init failed', err)
     errorMsg.value = (err as Error).message || '连接失败，请重试'
@@ -392,6 +418,43 @@ function goBackToList() {
   activeConversationName.value = ''
   activeConversationIsGroup.value = false
   chatStore.clearMessages()
+}
+
+// 打开群聊（点击群横幅卡片）
+function openGroupChat(g: { groupId: string; name: string }) {
+  selectConversation(g.groupId, g.name, true)
+  groupUnread.value = 0
+}
+
+// 群聊内返回按钮 → 回到客服私聊
+function backToServiceChat() {
+  chatStore.clearMessages()
+  activeConversation.value = serviceIdRef.value
+  activeConversationName.value = serviceUserName.value
+  activeConversationIsGroup.value = false
+  isSyncing = false
+  oldestSeq.value = 0
+  const peerId = serviceIdRef.value
+  pendingHistoryPeer = peerId
+  chatWs.loadHistory(peerId)
+  chatWs.markRead(peerId)
+}
+
+// 打开群成员面板
+async function openMembersPanel() {
+  if (!activeConversation.value) return
+  showMembersPanel.value = true
+  membersLoading.value = true
+  try {
+    const res = await request.get<unknown, { members: { userId: string; nickname: string; avatarUrl: string; role: string }[] }>(
+      `/client/groups/${activeConversation.value}/members`
+    )
+    groupMembers.value = res.members || []
+  } catch (e) {
+    console.error('[Chat] fetchGroupMembers failed', e)
+  } finally {
+    membersLoading.value = false
+  }
 }
 
 function onSendText(text: string) {
@@ -534,64 +597,184 @@ function onStartCall() {
 </script>
 
 <style scoped>
-/* All layout styles are in chat.css; only local overrides here */
-
-.user-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0;
-  background: var(--wechat-bg, #ededed);
-}
-
-.user-list-item {
+/* ── 群组入口横幅卡片 ──────────────────────────────── */
+.group-entry-card {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 14px 16px;
-  background: #fff;
-  border-bottom: 1px solid var(--wechat-border, #e5e5e5);
+  padding: 10px 14px;
+  background: linear-gradient(135deg, #1a2540 0%, #1e3a5f 100%);
+  border-bottom: 1px solid rgba(255,255,255,0.1);
   cursor: pointer;
+  flex-shrink: 0;
   transition: background 0.15s;
 }
-
-.user-list-item:active {
-  background: #d9d9d9;
+.group-entry-card:active {
+  background: linear-gradient(135deg, #243060 0%, #244870 100%);
 }
-
-.user-list-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.user-list-name {
-  font-size: 15px;
-  color: var(--wechat-text, #1a1a1a);
-  font-weight: 500;
-}
-
-.user-list-id {
-  font-size: 12px;
-  color: var(--wechat-text-secondary, #999);
-}
-
-.avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 6px;
-  background: var(--wechat-green, #07c160);
-  color: #fff;
+.gec-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: #3b5bdb;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.gec-avatar-img { width: 100%; height: 100%; object-fit: cover; }
+.gec-avatar-text { color: #fff; font-size: 16px; font-weight: 700; }
+.gec-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.gec-row1 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.gec-name {
+  font-size: 14px;
   font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gec-count {
+  font-size: 11px;
+  color: rgba(255,255,255,0.55);
+  flex-shrink: 0;
+}
+.gec-badge {
+  background: #e53935;
+  color: #fff;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 6px;
+  flex-shrink: 0;
+  min-width: 18px;
+  text-align: center;
+}
+.gec-preview {
+  font-size: 12px;
+  color: rgba(255,255,255,0.55);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gec-arrow {
+  color: rgba(255,255,255,0.35);
+  font-size: 20px;
   flex-shrink: 0;
 }
 
-.group-avatar {
-  background: #5b8cff;
-  font-size: 13px;
+/* ── 群聊 Header 按钮 ──────────────────────────────── */
+.back-btn-large {
+  background: none;
+  border: none;
+  font-size: 30px;
+  line-height: 1;
+  padding: 0 10px 0 4px;
+  color: #fff;
+  cursor: pointer;
+  font-weight: 300;
+}
+.members-btn {
+  background: none;
+  border: none;
+  padding: 0 4px 0 10px;
+  cursor: pointer;
+  line-height: 1;
+}
+.members-icon { font-size: 20px; }
+
+/* ── 群成员面板 ──────────────────────────────────────── */
+.members-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 2000;
+  display: flex;
+  align-items: flex-end;
+}
+.members-panel {
+  width: 100%;
+  background: #fff;
+  border-radius: 16px 16px 0 0;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+}
+.members-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid #f0f0f0;
+  flex-shrink: 0;
+}
+.members-panel-title { font-size: 16px; font-weight: 600; color: #1a1a1a; }
+.members-panel-close {
+  background: none;
+  border: none;
+  font-size: 18px;
+  color: #999;
+  cursor: pointer;
+  padding: 4px;
+}
+.members-loading {
+  text-align: center;
+  padding: 30px;
+  color: #999;
+  font-size: 14px;
+}
+.members-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px 8px;
+  padding: 16px;
+  overflow-y: auto;
+}
+.member-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+.member-avatar {
+  width: 52px;
+  height: 52px;
+  border-radius: 10px;
+  background: #3b5bdb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.member-avatar-img { width: 100%; height: 100%; object-fit: cover; }
+.member-avatar-text { color: #fff; font-size: 18px; font-weight: 600; }
+.member-name {
+  font-size: 11px;
+  color: #555;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+}
+
+/* ── 面板滑入动画 ─────────────────────────────────── */
+.slide-up-enter-active, .slide-up-leave-active {
+  transition: transform 0.25s ease;
+}
+.slide-up-enter-from, .slide-up-leave-to {
+  transform: translateY(100%);
 }
 
 .back-confirm-mask {

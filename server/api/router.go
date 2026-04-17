@@ -41,6 +41,12 @@ func SetupRouter(
 	// Client WebSocket
 	r.GET("/api/ws", chatHub.HandleClientWS)
 
+	// Client group API (JWT required)
+	clientGroup := r.Group("/api/client", JWTAuth())
+	{
+		clientGroup.GET("/groups/:id/members", ClientGetGroupMembers())
+	}
+
 	// WebSocket audio relay — handles PCM audio forwarding between PC and H5
 	r.GET("/api/call/audio", HandleAudioWS)
 

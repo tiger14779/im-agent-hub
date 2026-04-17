@@ -488,3 +488,53 @@ func ServiceKickFromGroup(chatHub *ChatHub) gin.HandlerFunc {
 		pkg.Success(c, buildGroupItem(g))
 	}
 }
+
+// ClientGetGroupMembers handles GET /api/client/groups/:id/members
+// Returns member list for a group the authenticated client user belongs to.
+func ClientGetGroupMembers() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		clientUserID := c.GetString("userID")
+		if clientUserID == "" {
+			pkg.Fail(c, 401, "未登录")
+			return
+		}
+		groupID := c.Param("id")
+
+		// Verify caller is a member of the group
+		var selfMember model.GroupMember
+		if err := database.DB.Where("group_id = ? AND user_id = ?", groupID, clientUserID).First(&selfMember).Error; err != nil {
+			pkg.Fail(c, 403, "无权查看此群")
+			return
+		}
+
+		var gms []model.GroupMember
+		database.DB.Where("group_id = ?", groupID).Find(&gms)
+
+		type memberInfo struct {
+			UserID    string `json:"userId"`
+			Nickname  string `json:"nickname"`
+			AvatarUrl string `json:"avatarUrl"`
+			Role      string `json:"role"`
+		}
+		mlist := make([]memberInfo, 0, len(gms))
+		for _, gm := range gms {
+			mi := memberInfo{UserID: gm.UserID, Role: gm.Role}
+			var u model.User
+			if err := database.DB.First(&u, "id = ?", gm.UserID).Error; err == nil {
+				mi.Nickname = u.GroupNickname
+				if mi.Nickname == "" {
+					mi.Nickname = u.Nickname
+				}
+				mi.AvatarUrl = u.Avatar
+			} else {
+				var s model.ServiceStaff
+				if err2 := database.DB.First(&s, "user_id = ?", gm.UserID).Error; err2 == nil {
+					mi.Nickname = s.Nickname
+					mi.AvatarUrl = s.Avatar
+				}
+			}
+			mlist = append(mlist, mi)
+		}
+		pkg.Success(c, gin.H{"groupId": groupID, "members": mlist})
+	}
+}
