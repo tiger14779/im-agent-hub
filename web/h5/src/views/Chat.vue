@@ -281,7 +281,7 @@ async function init() {
         if (msg.contentType === 101) groupLastMsg.value = senderPrefix + (msg.textContent || '')
         else if (msg.contentType === 102) groupLastMsg.value = senderPrefix + '[图片]'
         else if (msg.contentType === 103) groupLastMsg.value = senderPrefix + '[语音]'
-        else if (msg.contentType === 105) groupLastMsg.value = senderPrefix + '[文件]'
+        else if (msg.contentType === 105) groupLastMsg.value = senderPrefix + '[文件] ' + (msg.fileContent?.fileName || '')
         else groupLastMsg.value = senderPrefix + '新消息'
       }
     }
@@ -674,7 +674,7 @@ function onStartCall() {
   font-size: 30px;
   line-height: 1;
   padding: 0 10px 0 4px;
-  color: #fff;
+  color: var(--wechat-text);
   cursor: pointer;
   font-weight: 300;
 }
