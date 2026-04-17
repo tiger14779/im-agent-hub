@@ -1472,6 +1472,7 @@ Page {
         activeChatName = groupModel.getNickname(groupId)
         activeChatOnlineStatus = ""
         groupModel.clearUnread(groupId)
+        contactModel.clearUnread(groupId)
         oldestSeq = 0
         hasMoreHistory = true
         loadingMore = false

@@ -113,6 +113,19 @@ let ringtoneCtx: AudioContext | null = null
 let ringtoneTimer: ReturnType<typeof setTimeout> | null = null
 let ringtoneRunning = false
 let pendingCallReady: CallAudioReadyData | null = null // 缓存 call_audio_ready，WS 重连后可重试
+let wakeLock: WakeLockSentinel | null = null // 通话期间阻止息屏
+
+async function acquireWakeLock() {
+  if (wakeLock || !('wakeLock' in navigator)) return
+  try {
+    wakeLock = await (navigator as Navigator & { wakeLock: { request(type: string): Promise<WakeLockSentinel> } }).wakeLock.request('screen')
+    wakeLock.addEventListener('release', () => { wakeLock = null })
+  } catch (_) {}
+}
+
+function releaseWakeLock() {
+  if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null }
+}
 
 // ── 来电提示音（双振荡器 + 颤音，模拟真实电话铃声）─────────────────
 function ringBurst(ctx: AudioContext, t: number) {
@@ -305,6 +318,7 @@ chatWs.onCallInvite = (data: CallInviteData) => {
   callerName.value = data.fromName || data.fromId
   callFromId.value = data.fromId
   phase.value = 'incoming'
+  acquireWakeLock()
   startRingtone()
   // 30 秒无操作自动拒绝
   incomingTimer = setTimeout(() => {
@@ -407,6 +421,7 @@ function toggleMute() {
 // ── 结束通话清理 ──────────────────────────────────────────────────
 function endCall() {
   pendingCallReady = null // 清除缓存的音频凭证
+  releaseWakeLock()
   stopRingtone()
   if (audioWs) { audioWs.onclose = null; audioWs.close(); audioWs = null }
   if (captureStream) { captureStream.getTracks().forEach(t => t.stop()); captureStream = null }
@@ -439,6 +454,7 @@ function beginOutgoing(peerId: string, peerName: string) {
     audioCtx = new AudioContext({ sampleRate: 48000 })
   }
   phase.value = 'outgoing'
+  acquireWakeLock()
   // 发出邀请
   chatWs.sendCallInvite(peerId, props.myUserId)
   // 30 秒无人接听自动取消
@@ -466,7 +482,7 @@ function clearOutgoingTimer() {
   if (outgoingTimer) { clearTimeout(outgoingTimer); outgoingTimer = null }
 }
 
-onUnmounted(() => { endCall() })
+onUnmounted(() => { endCall(); releaseWakeLock() })
 </script>
 
 <style scoped>

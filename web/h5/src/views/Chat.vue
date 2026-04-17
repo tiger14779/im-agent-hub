@@ -188,6 +188,14 @@ function onPopState(_e: PopStateEvent) {
   // Browser back / swipe-back popped our guard state
   if (backGuardPushed) {
     backGuardPushed = false
+    // 群聊界面：右滑返回 → 直接回到客服私聊，不退出网页
+    if (activeConversationIsGroup.value) {
+      backToServiceChat()
+      // 重新推入守卫，防止下次右滑退出网页
+      backGuardPushed = false
+      pushBackGuard()
+      return
+    }
     showBackConfirm.value = true
   }
 }

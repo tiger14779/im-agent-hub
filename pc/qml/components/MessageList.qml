@@ -75,7 +75,7 @@ ListView {
         var added = count - _prevCount
         _prevCount = count
 
-        if (added <= 0) {
+        if (count === 0) {
             // clear() 或 model reset —— 重置所有滚动状态，标记需要滚底
             _prevContentHeight = 0
             _userScrolledUp = false
