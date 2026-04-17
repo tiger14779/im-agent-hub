@@ -83,7 +83,8 @@ public:
     // 添加本地临时消息（乐观发送：先显示“发送中”，服务器确认后更新状态）
     Q_INVOKABLE QString addPendingMessage(const QString &recvId, int contentType,
                                            const QString &text, const QString &imageUrl = {},
-                                           const QString &fileName = {}, qint64 fileSize = 0);
+                                           const QString &fileName = {}, qint64 fileSize = 0,
+                                           int voiceDuration = 0);
 
     // 更新临时消息的发送状态（1=发送中, 2=已发送, 3=失败）
     Q_INVOKABLE void updateStatus(const QString &clientMsgID, int status, const QString &serverMsgID = {});

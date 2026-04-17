@@ -681,6 +681,11 @@ Page {
                     onSendImage: function(filePath) {
                         sendImageMessage(filePath)
                     }
+                    onSendAudio: function(filePath, duration) {
+                        _pendingUploadType = "audio"
+                        _pendingAudioDuration = duration
+                        HttpClient.uploadFile(filePath)
+                    }
                 }
             }
 
@@ -959,6 +964,8 @@ Page {
     property string editPendingAvatarUrl: ""  // 编辑对话框的待上传头像URL
     property string pendingProfileAvatarUrl: ""  // 个人资料对话框的待上传头像URL
     property string pendingGroupAvatarUrl: ""    // 编辑群对话框的待上传头像URL
+    property string _pendingUploadType: ""       // 当前上传的类型: "audio" 或 ""
+    property int _pendingAudioDuration: 0        // 录音时长（秒）
 
     // 头像文件选择器（添加/编辑共用）
     FileDialog {
@@ -1752,6 +1759,29 @@ Page {
             }
 
             if (activeChatId.length === 0) return
+            // 语音消息（录音上传）
+            if (_pendingUploadType === "audio") {
+                _pendingUploadType = ""
+                var dur = _pendingAudioDuration
+                _pendingAudioDuration = 0
+                var voiceContent = JSON.stringify({"url": url, "duration": dur})
+                var voiceMsgId = chatModel.addPendingMessage(activeChatId, 103, "", resolveUrl(url), "", 0, dur)
+                if (activeChatIsGroup) {
+                    WsClient.sendGroupMessage(activeGroupId, 103, voiceContent, voiceMsgId)
+                    groupModel.updateLastMessage(activeGroupId, "[\u8BED\u97F3]", Date.now())
+                    contactModel.updateLastMessage(activeGroupId, "[\u8BED\u97F3]", Date.now())
+                } else {
+                    WsClient.sendMessage(activeChatId, 103, voiceContent, voiceMsgId)
+                    contactModel.updateLastMessage(activeChatId, "[\u8BED\u97F3]", Date.now())
+                    MessageCache.saveMessage({
+                        "clientMsgID": voiceMsgId, "sendID": staffUserId, "recvID": activeChatId,
+                        "contentType": 103, "sendTime": Date.now(), "status": 1,
+                        "voiceElem": {"sourceUrl": resolveUrl(url), "duration": dur}
+                    })
+                }
+                return
+            }
+
             // 根据文件扩展名判断发送类型
             var lower = origName.toLowerCase()
             if (lower.endsWith(".png") || lower.endsWith(".jpg") ||
@@ -1764,26 +1794,38 @@ Page {
                     "snapshotPicture": {"url": url, "width": 0, "height": 0, "size": 0, "type": "image/png"}
                 })
                 var imgMsgId = chatModel.addPendingMessage(activeChatId, 102, "", resolveUrl(url))
-                WsClient.sendMessage(activeChatId, 102, imgContent, imgMsgId)
-                contactModel.updateLastMessage(activeChatId, "[\u56FE\u7247]", Date.now())
-                MessageCache.saveMessage({
-                    "clientMsgID": imgMsgId, "sendID": staffUserId, "recvID": activeChatId,
-                    "contentType": 102, "sendTime": Date.now(), "status": 1,
-                    "pictureElem": {"sourcePicture": {"url": resolveUrl(url)}, "bigPicture": {"url": resolveUrl(url)}}
-                })
+                if (activeChatIsGroup) {
+                    WsClient.sendGroupMessage(activeGroupId, 102, imgContent, imgMsgId)
+                    groupModel.updateLastMessage(activeGroupId, "[\u56FE\u7247]", Date.now())
+                    contactModel.updateLastMessage(activeGroupId, "[\u56FE\u7247]", Date.now())
+                } else {
+                    WsClient.sendMessage(activeChatId, 102, imgContent, imgMsgId)
+                    contactModel.updateLastMessage(activeChatId, "[\u56FE\u7247]", Date.now())
+                    MessageCache.saveMessage({
+                        "clientMsgID": imgMsgId, "sendID": staffUserId, "recvID": activeChatId,
+                        "contentType": 102, "sendTime": Date.now(), "status": 1,
+                        "pictureElem": {"sourcePicture": {"url": resolveUrl(url)}, "bigPicture": {"url": resolveUrl(url)}}
+                    })
+                }
             } else {
                 // 文件消息 —— 使用 H5 兼容格式 {url, name, size}
                 var fileContent = JSON.stringify({
                     "url": url, "name": origName, "size": origSize
                 })
                 var fileMsgId = chatModel.addPendingMessage(activeChatId, 105, "", resolveUrl(url), origName, origSize)
-                WsClient.sendMessage(activeChatId, 105, fileContent, fileMsgId)
-                contactModel.updateLastMessage(activeChatId, "[\u6587\u4EF6]", Date.now())
-                MessageCache.saveMessage({
-                    "clientMsgID": fileMsgId, "sendID": staffUserId, "recvID": activeChatId,
-                    "contentType": 105, "sendTime": Date.now(), "status": 1,
-                    "fileElem": {"fileName": origName, "sourceUrl": resolveUrl(url), "fileSize": origSize}
-                })
+                if (activeChatIsGroup) {
+                    WsClient.sendGroupMessage(activeGroupId, 105, fileContent, fileMsgId)
+                    groupModel.updateLastMessage(activeGroupId, "[\u6587\u4EF6]", Date.now())
+                    contactModel.updateLastMessage(activeGroupId, "[\u6587\u4EF6]", Date.now())
+                } else {
+                    WsClient.sendMessage(activeChatId, 105, fileContent, fileMsgId)
+                    contactModel.updateLastMessage(activeChatId, "[\u6587\u4EF6]", Date.now())
+                    MessageCache.saveMessage({
+                        "clientMsgID": fileMsgId, "sendID": staffUserId, "recvID": activeChatId,
+                        "contentType": 105, "sendTime": Date.now(), "status": 1,
+                        "fileElem": {"fileName": origName, "sourceUrl": resolveUrl(url), "fileSize": origSize}
+                    })
+                }
             }
         }
 
@@ -2099,6 +2141,7 @@ Page {
             var preview = ""
             if (contentType === 101) preview = parsed["text"] ?? parsed["content"] ?? contentStr
             else if (contentType === 102) preview = "[图片]"
+            else if (contentType === 103) preview = "[语音]"
             else if (contentType === 105) preview = "[文件]"
 
             var chatMsg = {
@@ -2125,6 +2168,10 @@ Page {
                     "fileName": parsed["fileName"] ?? parsed["name"] ?? "",
                     "sourceUrl": resolveUrl(parsed["sourceUrl"] ?? parsed["url"] ?? ""),
                     "fileSize": parsed["fileSize"] ?? parsed["size"] ?? 0
+                } : undefined,
+                "voiceElem": contentType === 103 ? {
+                    "sourceUrl": resolveUrl(parsed["url"] ?? parsed["sourceUrl"] ?? ""),
+                    "duration": parsed["duration"] ?? 0
                 } : undefined
             }
 
@@ -2144,6 +2191,7 @@ Page {
                 MessageCache.saveMessage(chatMsg)
                 var _gDlUrl = ""
                 if (contentType === 102) _gDlUrl = ((chatMsg["pictureElem"] || {})["sourcePicture"] || {})["url"] || ""
+                else if (contentType === 103) _gDlUrl = (chatMsg["voiceElem"] || {})["sourceUrl"] || ""
                 else if (contentType === 105) _gDlUrl = (chatMsg["fileElem"] || {})["sourceUrl"] || ""
                 if (_gDlUrl) HttpClient.downloadMedia(_gDlUrl, chatMsg["clientMsgID"])
             }

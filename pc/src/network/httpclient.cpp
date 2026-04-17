@@ -402,6 +402,11 @@ QString HttpClient::getSetting(const QString &key, const QString &defaultValue)
     return settings.value(key, defaultValue).toString();
 }
 
+QString HttpClient::tempDir() const
+{
+    return QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+}
+
 // ── 剪贴板操作 ─────────────────────────────────────────
 
 void HttpClient::copyToClipboard(const QString &text)

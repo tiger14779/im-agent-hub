@@ -138,7 +138,7 @@ static float decodeSample(const char *data, QAudioFormat::SampleFormat fmt)
     }
 }
 
-// 将任意采集格式 → 协议格式（8kHz Int16 单声道）
+// 将任意采集格式 → 协议格式（Int16 单声道，采样率与 audioFormat() 一致）
 QByteArray AudioCallEngine::convertToWire(const QByteArray &raw, const QAudioFormat &src)
 {
     const int srcRate = src.sampleRate();
@@ -160,10 +160,10 @@ QByteArray AudioCallEngine::convertToWire(const QByteArray &raw, const QAudioFor
         mono[i] = (srcCh > 1) ? sum / srcCh : sum;
     }
 
-    // 步骤2：均值框滤波降采样 srcRate → 8kHz
+    // 步骤2：重采样 srcRate → 线上格式采样率（与 audioFormat() 一致）
     // 对每个输出帧，将对应的全部输入样本求均值，
     // 相当于一个简单的低通（抗混叠）滤波器，消除混叠失真。
-    const int dstRate    = 8000;
+    const int dstRate    = audioFormat().sampleRate(); // 48000
     const int nDstFrames = (srcRate == dstRate)
                            ? nSrcFrames
                            : static_cast<int>(static_cast<double>(nSrcFrames) * dstRate / srcRate);
@@ -175,7 +175,7 @@ QByteArray AudioCallEngine::convertToWire(const QByteArray &raw, const QAudioFor
         for (int i = 0; i < nDstFrames; i++)
             dst16[i] = static_cast<qint16>(qBound(-32768.0f, mono[i] * 32767.0f, 32767.0f));
     } else {
-        const double ratio = static_cast<double>(srcRate) / dstRate; // e.g. 6.0 for 48k→8k
+        const double ratio = static_cast<double>(srcRate) / dstRate;
         for (int i = 0; i < nDstFrames; i++) {
             // 对应的源帧范围 [srcStart, srcEnd)
             const double srcStart = i * ratio;
@@ -194,10 +194,10 @@ QByteArray AudioCallEngine::convertToWire(const QByteArray &raw, const QAudioFor
     return out;
 }
 
-// 将协议格式（8kHz Int16 单声道）→ 任意播放格式
+// 将协议格式（Int16 单声道，采样率与 audioFormat() 一致）→ 任意播放格式
 QByteArray AudioCallEngine::convertFromWire(const QByteArray &wire, const QAudioFormat &dst)
 {
-    const int srcRate    = 8000;
+    const int srcRate    = audioFormat().sampleRate(); // 48000
     const int nSrcFrames = wire.size() / static_cast<int>(sizeof(qint16));
     if (nSrcFrames == 0) return {};
 

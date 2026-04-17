@@ -133,7 +133,7 @@ void ChatModel::prependMessages(const QJsonArray &msgs)
 
 QString ChatModel::addPendingMessage(const QString &recvId, int contentType,
                                       const QString &text, const QString &imageUrl,
-                                      const QString &fileName, qint64 fileSize)
+                                      const QString &fileName, qint64 fileSize, int voiceDuration)
 {
     ChatMessage msg;
     msg.clientMsgID = QUuid::createUuid().toString(QUuid::WithoutBraces);
@@ -144,6 +144,7 @@ QString ChatModel::addPendingMessage(const QString &recvId, int contentType,
     msg.imageUrl = imageUrl;
     msg.fileName = fileName;
     msg.fileSize = fileSize;
+    msg.voiceDuration = voiceDuration;
     msg.sendTime = QDateTime::currentMSecsSinceEpoch();
     msg.status = 1; // 发送中
 

@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Dialogs
+import QtMultimedia
 import ImAgentHub
 
 // 聊天输入栏组件 —— 包含工具栏（表情/图片/文件）、预览区和文本输入区
@@ -16,8 +17,46 @@ Rectangle {
     signal sendText(string text)       // 发送文本消息
     signal sendFile(string filePath)   // 发送文件
     signal sendImage(string filePath)  // 发送图片
+    signal sendAudio(string filePath, int duration)  // 发送语音
+
+    // 录音状态
+    property int _recSeconds: 0
+    property bool _recActive: false
 
     // 待发送的附件列表: [{path, type, name}]  type: "image" | "file"
+
+    // 录音组件
+    CaptureSession {
+        id: captureSession
+        audioInput: AudioInput {}
+        recorder: MediaRecorder {
+            id: audioRecorder
+            mediaFormat {
+                fileType: MediaFormat.Wave
+            }
+            onRecorderStateChanged: {
+                if (recorderState === MediaRecorder.StoppedState && chatInput._recActive) {
+                    chatInput._recActive = false
+                    var dur = chatInput._recSeconds
+                    chatInput._recSeconds = 0
+                    var path = audioRecorder.actualLocation.toString()
+                    if (path.startsWith("file:///"))
+                        path = path.substring(8)
+                    // Windows: file:///C:/... → C:/...
+                    path = path.replace(/\//g, "\\")
+                    if (dur > 0 && path.length > 4)
+                        chatInput.sendAudio(path, dur)
+                }
+            }
+        }
+    }
+
+    Timer {
+        id: recTimer
+        interval: 1000
+        repeat: true
+        onTriggered: chatInput._recSeconds++
+    }
 
     // ── 拖入文件/图片到聊天框 ──
     DropArea {
@@ -154,6 +193,48 @@ Rectangle {
                 ToolTip.text: "\u53D1\u9001\u6587\u4EF6"
                 ToolTip.visible: hovered
                 onClicked: fileDialog.open()
+            }
+
+            // 录音按钮
+            ToolButton {
+                id: micBtn
+                width: 28; height: 28
+                contentItem: Label {
+                    text: chatInput._recActive ? "\u23F9" : "\uD83C\uDFA4"  // ⏹ / 🎤
+                    font.pixelSize: chatInput._recActive ? 16 : 18
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    color: chatInput._recActive ? "#fa5151" : "black"
+                }
+                ToolTip.text: chatInput._recActive
+                              ? ("\u505C\u6B62\u5F55\u97F3 (" + chatInput._recSeconds + "\u79D2)")
+                              : "\u5F55\u5236\u8BED\u97F3"
+                ToolTip.visible: hovered
+                ToolTip.delay: 0
+                onClicked: {
+                    if (!chatInput._recActive) {
+                        // 开始录音
+                        var tmpFile = HttpClient.tempDir() + "/voice_" + Date.now() + ".wav"
+                        tmpFile = tmpFile.replace(/\\/g, "/")
+                        audioRecorder.outputLocation = Qt.url("file:///" + tmpFile)
+                        chatInput._recSeconds = 0
+                        chatInput._recActive = true
+                        audioRecorder.record()
+                        recTimer.start()
+                    } else {
+                        // 停止录音 → 触发 onRecorderStateChanged
+                        recTimer.stop()
+                        audioRecorder.stop()
+                    }
+                }
+            }
+
+            // 录音时长指示
+            Label {
+                visible: chatInput._recActive
+                text: "\uD83D\uDD34 " + chatInput._recSeconds + "''"  // 🔴 N''
+                font.pixelSize: 12
+                color: "#fa5151"
             }
 
             Item { Layout.fillWidth: true }
