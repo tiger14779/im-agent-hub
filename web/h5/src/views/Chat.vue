@@ -431,6 +431,7 @@ async function onSendImage(file: File) {
   const peerId = activeConversation.value || serviceIdRef.value
   const url = URL.createObjectURL(file)
   const tempMsgID = `tmp_${Date.now()}`
+  const isGroup = activeConversationIsGroup.value
   const tempMsg: Message = {
     clientMsgID: tempMsgID,
     sendID: userStore.userId,
@@ -440,11 +441,14 @@ async function onSendImage(file: File) {
     content: '',
     pictureContent: { snapshotPicture: { url } },
     sendTime: Date.now(),
-    status: 1
+    status: 1,
+    ...(isGroup ? { isGroup: true } : {})
   }
   chatStore.addMessage(tempMsg)
   try {
-    const realId = await chatWs.sendImageMessage(peerId, file)
+    const realId = isGroup
+      ? await chatWs.sendGroupImageMessage(peerId, file)
+      : await chatWs.sendImageMessage(peerId, file)
     // Update temp msg's clientMsgID to the real one for ACK matching
     const msg = chatStore.messages.find(m => m.clientMsgID === tempMsgID)
     if (msg) msg.clientMsgID = realId
@@ -455,6 +459,7 @@ async function onSendImage(file: File) {
 
 async function onSendFile(file: File) {
   const peerId = activeConversation.value || serviceIdRef.value
+  const isGroup = activeConversationIsGroup.value
   const tempMsgID = `tmp_${Date.now()}`
   const tempMsg: Message = {
     clientMsgID: tempMsgID,
@@ -465,11 +470,14 @@ async function onSendFile(file: File) {
     content: '',
     fileContent: { fileName: file.name, fileSize: file.size, fileType: file.type },
     sendTime: Date.now(),
-    status: 1
+    status: 1,
+    ...(isGroup ? { isGroup: true } : {})
   }
   chatStore.addMessage(tempMsg)
   try {
-    const realId = await chatWs.sendFileMessage(peerId, file)
+    const realId = isGroup
+      ? await chatWs.sendGroupFileMessage(peerId, file)
+      : await chatWs.sendFileMessage(peerId, file)
     const msg = chatStore.messages.find(m => m.clientMsgID === tempMsgID)
     if (msg) msg.clientMsgID = realId
   } catch (err) {
@@ -479,6 +487,7 @@ async function onSendFile(file: File) {
 
 async function onSendVoice({ blob, duration }: { blob: Blob; duration: number }) {
   const peerId = activeConversation.value || serviceIdRef.value
+  const isGroup = activeConversationIsGroup.value
   const url = URL.createObjectURL(blob)
   const tempMsgID = `tmp_${Date.now()}`
   const tempMsg: Message = {
@@ -490,11 +499,14 @@ async function onSendVoice({ blob, duration }: { blob: Blob; duration: number })
     content: '',
     voiceContent: { sourceUrl: url, duration },
     sendTime: Date.now(),
-    status: 1
+    status: 1,
+    ...(isGroup ? { isGroup: true } : {})
   }
   chatStore.addMessage(tempMsg)
   try {
-    const realId = await chatWs.sendVoiceMessage(peerId, blob, duration)
+    const realId = isGroup
+      ? await chatWs.sendGroupVoiceMessage(peerId, blob, duration)
+      : await chatWs.sendVoiceMessage(peerId, blob, duration)
     const msg = chatStore.messages.find(m => m.clientMsgID === tempMsgID)
     if (msg) msg.clientMsgID = realId
   } catch (err) {

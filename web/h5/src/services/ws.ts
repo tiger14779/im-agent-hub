@@ -503,6 +503,75 @@ class ChatWsService {
     return clientMsgId
   }
 
+  async sendGroupImageMessage(groupId: string, file: File): Promise<string> {
+    const url = await this.uploadFile(file)
+    const clientMsgId = uuid()
+    const sent = this.send('send_group_message', {
+      groupId,
+      contentType: 102,
+      content: JSON.stringify({ url, name: file.name, size: file.size, type: file.type }),
+      clientMsgId
+    })
+    if (!sent) {
+      setTimeout(() => this.onAck({ clientMsgId, status: 3, error: '连接已断开，请稍后重试' }), 0)
+    } else {
+      const timer = setTimeout(() => {
+        if (this.pendingGroupTimers.has(clientMsgId)) {
+          this.pendingGroupTimers.delete(clientMsgId)
+          this.onAck({ clientMsgId, status: 3, error: '发送超时' })
+        }
+      }, ChatWsService.ACK_TIMEOUT)
+      this.pendingGroupTimers.set(clientMsgId, timer)
+    }
+    return clientMsgId
+  }
+
+  async sendGroupVoiceMessage(groupId: string, blob: Blob, duration: number): Promise<string> {
+    const url = await this.uploadFile(new File([blob], 'voice.webm', { type: blob.type }))
+    const clientMsgId = uuid()
+    const sent = this.send('send_group_message', {
+      groupId,
+      contentType: 103,
+      content: JSON.stringify({ url, duration, size: blob.size }),
+      clientMsgId
+    })
+    if (!sent) {
+      setTimeout(() => this.onAck({ clientMsgId, status: 3, error: '连接已断开，请稍后重试' }), 0)
+    } else {
+      const timer = setTimeout(() => {
+        if (this.pendingGroupTimers.has(clientMsgId)) {
+          this.pendingGroupTimers.delete(clientMsgId)
+          this.onAck({ clientMsgId, status: 3, error: '发送超时' })
+        }
+      }, ChatWsService.ACK_TIMEOUT)
+      this.pendingGroupTimers.set(clientMsgId, timer)
+    }
+    return clientMsgId
+  }
+
+  async sendGroupFileMessage(groupId: string, file: File): Promise<string> {
+    const url = await this.uploadFile(file)
+    const clientMsgId = uuid()
+    const sent = this.send('send_group_message', {
+      groupId,
+      contentType: 105,
+      content: JSON.stringify({ url, name: file.name, size: file.size, type: file.type }),
+      clientMsgId
+    })
+    if (!sent) {
+      setTimeout(() => this.onAck({ clientMsgId, status: 3, error: '连接已断开，请稍后重试' }), 0)
+    } else {
+      const timer = setTimeout(() => {
+        if (this.pendingGroupTimers.has(clientMsgId)) {
+          this.pendingGroupTimers.delete(clientMsgId)
+          this.onAck({ clientMsgId, status: 3, error: '发送超时' })
+        }
+      }, ChatWsService.ACK_TIMEOUT)
+      this.pendingGroupTimers.set(clientMsgId, timer)
+    }
+    return clientMsgId
+  }
+
   loadHistory(peerUserId: string, beforeSeq = 0, limit = 50) {
     this.send('load_history', { peerUserId, beforeSeq, limit })
   }
