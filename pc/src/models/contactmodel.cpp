@@ -139,9 +139,16 @@ void ContactModel::addOrUpdateAsGroup(const QString &groupId, const QString &nam
             || name.contains(m_filterText, Qt::CaseInsensitive)
             || groupId.contains(m_filterText, Qt::CaseInsensitive);
         if (matches) {
-            int newFilteredRow = m_filteredIndices.size();
-            beginInsertRows(QModelIndex(), newFilteredRow, newFilteredRow);
-            m_filteredIndices.append(realIdx);
+            // 群组始终置顶：插入到已有群组之后、第一个非群组之前
+            int insertRow = 0;
+            for (int i = 0; i < m_filteredIndices.size(); ++i) {
+                if (m_contacts[m_filteredIndices[i]].isGroup)
+                    insertRow = i + 1;
+                else
+                    break;
+            }
+            beginInsertRows(QModelIndex(), insertRow, insertRow);
+            m_filteredIndices.insert(insertRow, realIdx);
             endInsertRows();
         }
         emit countChanged();
