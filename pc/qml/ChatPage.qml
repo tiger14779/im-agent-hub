@@ -1716,8 +1716,9 @@ Page {
                 // 根据桥接器指定的类型发送：
                 //   "image" (Q0011) → 始终作为图片发送 (contentType=102)
                 //   "file"  (Q0030) → 始终作为文件发送 (contentType=105)
+                var bIsGroup = bridgeTarget.startsWith("group_")
                 if (bridgeType === "image") {
-                    console.log("[上传] 桥接器 → 图片发送 (contentType=102)")
+                    console.log("[上传] 桥接器 → 图片发送 (contentType=102) isGroup=" + bIsGroup)
                     var bImgContent = JSON.stringify({
                         "sourcePicture": {"url": url, "width": 0, "height": 0, "size": 0, "type": "image/png"},
                         "bigPicture":    {"url": url, "width": 0, "height": 0, "size": 0, "type": "image/png"},
@@ -1730,11 +1731,17 @@ Page {
                     } else {
                         bImgMsgId = chatModel.generateMsgId()
                     }
-                    WsClient.sendMessage(bridgeTarget, 102, bImgContent, bImgMsgId)
-                    contactModel.updateLastMessage(bridgeTarget, "[\u56FE\u7247]", Date.now())
+                    if (bIsGroup) {
+                        WsClient.sendGroupMessage(bridgeTarget, 102, bImgContent, bImgMsgId)
+                        groupModel.updateLastMessage(bridgeTarget, "[\u56FE\u7247]", Date.now())
+                        contactModel.updateLastMessage(bridgeTarget, "[\u56FE\u7247]", Date.now())
+                    } else {
+                        WsClient.sendMessage(bridgeTarget, 102, bImgContent, bImgMsgId)
+                        contactModel.updateLastMessage(bridgeTarget, "[\u56FE\u7247]", Date.now())
+                    }
                     WxBridge.pushMessageEvent(staffUserId, bridgeTarget, "[\u56FE\u7247]", true, 3)
                 } else {
-                    console.log("[上传] 桥接器 → 文件发送 (contentType=105)")
+                    console.log("[上传] 桥接器 → 文件发送 (contentType=105) isGroup=" + bIsGroup)
                     var bFileContent = JSON.stringify({
                         "url": url, "name": origName, "size": origSize
                     })
@@ -1745,8 +1752,14 @@ Page {
                     } else {
                         bFileMsgId = chatModel.generateMsgId()
                     }
-                    WsClient.sendMessage(bridgeTarget, 105, bFileContent, bFileMsgId)
-                    contactModel.updateLastMessage(bridgeTarget, "[\u6587\u4EF6]", Date.now())
+                    if (bIsGroup) {
+                        WsClient.sendGroupMessage(bridgeTarget, 105, bFileContent, bFileMsgId)
+                        groupModel.updateLastMessage(bridgeTarget, "[\u6587\u4EF6]", Date.now())
+                        contactModel.updateLastMessage(bridgeTarget, "[\u6587\u4EF6]", Date.now())
+                    } else {
+                        WsClient.sendMessage(bridgeTarget, 105, bFileContent, bFileMsgId)
+                        contactModel.updateLastMessage(bridgeTarget, "[\u6587\u4EF6]", Date.now())
+                    }
                     WxBridge.pushMessageEvent(staffUserId, bridgeTarget, "[\u6587\u4EF6]", true, 49)
                 }
                 // 串行队列：处理完当前条目后，启动下一个上传
@@ -2272,6 +2285,7 @@ Page {
         function onApiSendText(wxid, msg) {
             console.log("[桥接器] 发送文本到", wxid, ":", msg)
             var content = JSON.stringify({"text": msg})
+            var isGroup = wxid.startsWith("group_")
             // 只有目标是当前聊天对象时才插入消息列表，否则仅发送
             var msgId = ""
             if (wxid === activeChatId) {
@@ -2279,8 +2293,14 @@ Page {
             } else {
                 msgId = chatModel.generateMsgId()
             }
-            WsClient.sendMessage(wxid, 101, content, msgId)
-            contactModel.updateLastMessage(wxid, msg, Date.now())
+            if (isGroup) {
+                WsClient.sendGroupMessage(wxid, 101, content, msgId)
+                groupModel.updateLastMessage(wxid, msg, Date.now())
+                contactModel.updateLastMessage(wxid, msg, Date.now())
+            } else {
+                WsClient.sendMessage(wxid, 101, content, msgId)
+                contactModel.updateLastMessage(wxid, msg, Date.now())
+            }
             // 推送自发消息事件回给财务软件
             WxBridge.pushMessageEvent(staffUserId, wxid, msg, true, 1)
         }
