@@ -147,10 +147,23 @@ class ChatWsService {
     if (this.isConnecting) return
 
     if (this.ws) {
-      this.ws.onclose = null
-      this.ws.close()
+      const old = this.ws
+      this.ws = null
+      old.onclose = null
+      old.onerror = null
+      old.onmessage = null
+      if (old.readyState === WebSocket.OPEN || old.readyState === WebSocket.CONNECTING) {
+        // 等旧连接真正关闭后再建新连接，防止微信 WebView 保活旧页面时形成互踢循环
+        old.onclose = () => { this._openNewWs() }
+        old.close()
+        return
+      }
     }
 
+    this._openNewWs()
+  }
+
+  private _openNewWs() {
     const url = this.buildWsUrl()
     this.ws = new WebSocket(url)
 
