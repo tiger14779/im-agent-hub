@@ -78,6 +78,78 @@ else
     warn "Node.js/npm 未安装，跳过前端构建（静态文件保持不变）"
 fi
 
+# ---------- 更新 Nginx 配置（如果已安装且站点配置存在）----------
+if command -v nginx &>/dev/null; then
+    # 检测已部署的域名（取 sites-enabled 里第一个非 default 的配置文件名）
+    NGINX_SITE=$(ls /etc/nginx/sites-enabled/ 2>/dev/null | grep -v '^default$' | head -1)
+    if [ -n "$NGINX_SITE" ]; then
+        DOMAIN="$NGINX_SITE"
+        PORT=$(grep -oP '(?<=proxy_pass http://127\.0\.0\.1:)\d+' "/etc/nginx/sites-available/${DOMAIN}" 2>/dev/null | head -1)
+        PORT="${PORT:-8080}"
+        info "检测到 Nginx 站点: ${DOMAIN}（后端端口 ${PORT}），更新配置..."
+        cat > "/etc/nginx/sites-available/${DOMAIN}" <<NGINXEOF
+server {
+    listen 80;
+    server_name ${DOMAIN} www.${DOMAIN};
+
+    client_max_body_size 50m;
+
+    location / {
+        proxy_pass http://127.0.0.1:${PORT};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    location /api/ws {
+        proxy_pass http://127.0.0.1:${PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_read_timeout 86400s;
+    }
+
+    location /api/service/ws {
+        proxy_pass http://127.0.0.1:${PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_read_timeout 86400s;
+    }
+
+    location /api/call/audio {
+        proxy_pass http://127.0.0.1:${PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_read_timeout 86400s;
+    }
+}
+NGINXEOF
+        # 保留 certbot 写入的 SSL 段（如果证书存在则让 certbot 重新注入）
+        if [ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]; then
+            certbot install --nginx -d "${DOMAIN}" --reinstall --non-interactive 2>/dev/null || true
+        fi
+        if nginx -t 2>/dev/null; then
+            systemctl reload nginx
+            info "Nginx 配置已更新并重载 ✓"
+        else
+            warn "Nginx 配置测试失败，跳过重载，请手动检查: nginx -t"
+        fi
+    else
+        info "未检测到活跃的 Nginx 站点，跳过 Nginx 更新"
+    fi
+else
+    info "Nginx 未安装，跳过"
+fi
+
 # ---------- 重启服务 ----------
 info "重启服务..."
 systemctl restart im-agent-hub
