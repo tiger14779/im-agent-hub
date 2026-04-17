@@ -26,6 +26,12 @@ void AudioRingBuffer::push(const QByteArray &data)
     m_buf.append(data);
 }
 
+void AudioRingBuffer::clear()
+{
+    QMutexLocker lock(&m_mutex);
+    m_buf.clear();
+}
+
 qint64 AudioRingBuffer::bytesAvailable() const
 {
     QMutexLocker lock(&m_mutex);
@@ -67,6 +73,11 @@ AudioCallEngine::AudioCallEngine(QObject *parent)
     connect(&m_ws, &QWebSocket::binaryMessageReceived, this, &AudioCallEngine::onAudioFrame);
     connect(&m_ws, QOverload<QAbstractSocket::SocketError>::of(&QWebSocket::errorOccurred),
             this, &AudioCallEngine::onWsError);
+
+    // Sink 看门狗：每 300ms 检出 Realtek 等驱动把 sink 置大 Stopped/Suspended 的情况
+    m_sinkWatchdog = new QTimer(this);
+    m_sinkWatchdog->setInterval(300);
+    connect(m_sinkWatchdog, &QTimer::timeout, this, &AudioCallEngine::onSinkWatchdog);
 }
 
 AudioCallEngine::~AudioCallEngine()
@@ -276,6 +287,112 @@ QStringList AudioCallEngine::outputDevices() const
     return result;
 }
 
+QString AudioCallEngine::inputDeviceId(int index) const
+{
+    const auto devs = QMediaDevices::audioInputs();
+    if (index < 0 || index >= devs.size()) return {};
+    return QString::fromUtf8(devs.at(index).id());
+}
+
+QString AudioCallEngine::outputDeviceId(int index) const
+{
+    const auto devs = QMediaDevices::audioOutputs();
+    if (index < 0 || index >= devs.size()) return {};
+    return QString::fromUtf8(devs.at(index).id());
+}
+
+// WASAPI 部分设备（如虚拟麦克风、蓝牙设备）preferredFormat() 会返回无效格式
+// （0 Hz / 0 ch / Unknown），需要回退到协议格式。
+static QAudioFormat resolveInputFormat(const QAudioDevice &dev, const QAudioFormat &wireFormat)
+{
+    const QAudioFormat pref = dev.preferredFormat();
+    if (pref.isValid() && pref.sampleRate() > 0 && pref.channelCount() > 0)
+        return pref;
+    qWarning() << "[AudioCallEngine] input preferredFormat invalid for" << dev.description()
+               << ", falling back to wire format";
+    return wireFormat; // 48kHz Int16 Mono
+}
+
+// 同理，输出设备格式回退
+static QAudioFormat resolveOutputFormat(const QAudioDevice &dev, const QAudioFormat &wireFormat)
+{
+    const QAudioFormat pref = dev.preferredFormat();
+    if (pref.isValid() && pref.sampleRate() > 0 && pref.channelCount() > 0)
+        return pref;
+    qWarning() << "[AudioCallEngine] output preferredFormat invalid for" << dev.description()
+               << ", falling back to wire format";
+    return wireFormat;
+}
+
+void AudioCallEngine::changeInputDevice(const QString &inputId)
+{
+    if (!m_active) return;
+
+    QAudioDevice inputDev = QMediaDevices::defaultAudioInput();
+    if (!inputId.isEmpty()) {
+        for (const QAudioDevice &d : QMediaDevices::audioInputs()) {
+            if (d.id() == inputId.toUtf8()) { inputDev = d; break; }
+        }
+    }
+
+    // WASAPI 共享模式下 isFormatSupported() 不可靠（尤其 Realtek）
+    // 始终使用设备首选格式，由 convertToWire 负责格式转换
+    const QAudioFormat captureFormat = resolveInputFormat(inputDev, audioFormat());
+    m_captureFormat = captureFormat;
+
+    // 先断开旧信号，防止 stop() 内部处理事件时触发 onCaptureReady 重入
+    if (m_captureDevice) {
+        disconnect(m_captureDevice, &QIODevice::readyRead, this, &AudioCallEngine::onCaptureReady);
+        m_captureDevice = nullptr;
+    }
+    if (m_source) {
+        m_source->stop();
+        m_source->deleteLater(); // 延迟删除，避免主线程等待 WASAPI 内部线程退出而卡死
+        m_source = nullptr;
+    }
+    m_source = new QAudioSource(inputDev, captureFormat, this);
+    if (m_muted) m_source->setVolume(0.0f);
+    m_captureDevice = m_source->start();
+    if (m_captureDevice)
+        connect(m_captureDevice, &QIODevice::readyRead, this, &AudioCallEngine::onCaptureReady);
+    qDebug() << "[AudioCallEngine] input device switched to" << inputDev.description();
+}
+
+void AudioCallEngine::changeOutputDevice(const QString &outputId)
+{
+    if (!m_active || !m_ringBuffer) return;
+
+    QAudioDevice outputDev = QMediaDevices::defaultAudioOutput();
+    if (!outputId.isEmpty()) {
+        for (const QAudioDevice &d : QMediaDevices::audioOutputs()) {
+            if (d.id() == outputId.toUtf8()) { outputDev = d; break; }
+        }
+    }
+
+    // WASAPI 共享模式下 isFormatSupported() 不可靠（尤其 Realtek）
+    // 始终使用设备首选格式，由 convertFromWire 负责格式转换
+    const QAudioFormat playbackFormat = resolveOutputFormat(outputDev, audioFormat());
+    m_playbackFormat = playbackFormat;
+
+    if (m_sink) {
+        m_sink->stop();
+        m_sink->deleteLater(); // 延迟删除，避免主线程卡死
+        m_sink = nullptr;
+    }
+
+    // 清空环形缓冲，避免旧设备格式的残留数据在新设备上播放乱码
+    m_ringBuffer->clear();
+
+    m_sink = new QAudioSink(outputDev, playbackFormat, this);
+    const int bufBytes = static_cast<int>(playbackFormat.sampleRate()
+                                          * playbackFormat.channelCount()
+                                          * bytesPerSample(playbackFormat.sampleFormat())
+                                          * 0.08);
+    if (bufBytes > 0) m_sink->setBufferSize(bufBytes);
+    m_sink->start(m_ringBuffer);
+    qDebug() << "[AudioCallEngine] output device switched to" << outputDev.description();
+}
+
 // ── 通话控制 ──────────────────────────────────────────────────────────────────
 
 void AudioCallEngine::start(const QString &wsBase, const QString &serverBaseUrl,
@@ -302,17 +419,11 @@ void AudioCallEngine::start(const QString &wsBase, const QString &serverBaseUrl,
         }
     }
 
-    // 尝试用 8kHz 启动；若设备不支持则回退到设备首选格式（WASAPI 共享模式）
-    QAudioFormat captureFormat = fmt;
-    if (!inputDev.isFormatSupported(fmt)) {
-        qDebug() << "[AudioCallEngine] 8kHz not supported by input, using preferred format";
-        captureFormat = inputDev.preferredFormat();
-    }
-    QAudioFormat playbackFormat = fmt;
-    if (!outputDev.isFormatSupported(fmt)) {
-        qDebug() << "[AudioCallEngine] 8kHz not supported by output, using preferred format";
-        playbackFormat = outputDev.preferredFormat();
-    }
+    // WASAPI 共享模式下 isFormatSupported() 对部分设备（如 Realtek）不可靠：
+    // 有时报告支持某格式但实际静默丢包。始终使用 preferredFormat()，
+    // convertToWire / convertFromWire 负责与协议格式（48kHz Int16 Mono）之间的转换。
+    const QAudioFormat captureFormat  = resolveInputFormat(inputDev,   audioFormat());
+    const QAudioFormat playbackFormat = resolveOutputFormat(outputDev, audioFormat());
     // 保存实际使用的格式（可能与协议线上格式不同）
     m_captureFormat  = captureFormat;
     m_playbackFormat = playbackFormat;
@@ -325,15 +436,18 @@ void AudioCallEngine::start(const QString &wsBase, const QString &serverBaseUrl,
              << playbackFormat.channelCount() << "ch"
              << playbackFormat.sampleFormat();
 
-    // 启动音频采集
+    // 启动音频采集（失败时仅警告，不中断通话，仍可听到对方）
     m_source = new QAudioSource(inputDev, captureFormat, this);
     m_captureDevice = m_source->start();
     if (!m_captureDevice) {
-        emit errorOccurred(QStringLiteral("麦克风启动失败"));
+        qWarning() << "[AudioCallEngine] microphone failed to start (format="
+                   << captureFormat.sampleRate() << "Hz" << captureFormat.channelCount() << "ch"
+                   << captureFormat.sampleFormat() << "), continuing without capture";
         delete m_source; m_source = nullptr;
-        return;
+        // 不 return：即使没有麦克风也要建立 sink 和 WS，让用户至少能听到对方
+    } else {
+        connect(m_captureDevice, &QIODevice::readyRead, this, &AudioCallEngine::onCaptureReady);
     }
-    connect(m_captureDevice, &QIODevice::readyRead, this, &AudioCallEngine::onCaptureReady);
 
     // 启动音频播放（pull 模式：sink 主动从环形缓冲区拉数据，避免 push 模式下的缓冲堆积/爆音）
     m_ringBuffer = new AudioRingBuffer(this);
@@ -345,6 +459,11 @@ void AudioCallEngine::start(const QString &wsBase, const QString &serverBaseUrl,
                                           * 0.08); // 80ms
     if (bufBytes > 0) m_sink->setBufferSize(bufBytes);
     m_sink->start(m_ringBuffer); // pull 模式：传入 QIODevice*
+    qDebug() << "[AudioCallEngine] sink started: state=" << m_sink->state()
+             << "error=" << m_sink->error()
+             << "fmt=" << playbackFormat.sampleRate() << "Hz"
+             << playbackFormat.channelCount() << "ch" << playbackFormat.sampleFormat();
+    m_sinkWatchdog->start();
 
     // 连接 WebSocket
     const QString url = buildUrl(wsBase, serverBaseUrl, roomId, token);
@@ -361,6 +480,8 @@ void AudioCallEngine::stop()
 
     // 先置 false，防止 m_ws.close() 同步触发 disconnected/error 信号导致递归调用 stop()
     m_active = false;
+    m_sinkWatchdog->stop();
+    m_sinkIdleTicks = 0;
 
     m_ws.close();
 
@@ -380,17 +501,83 @@ void AudioCallEngine::stop()
         m_ringBuffer = nullptr;
     }
 
+    // 清空 AEC 状态
+    m_speakerRef.clear();
+    m_nlmsW.clear();
+
     emit activeChanged();
+}
+
+void AudioCallEngine::setAecEnabled(bool enabled)
+{
+    if (m_aecEnabled == enabled) return;
+    m_aecEnabled = enabled;
+    if (!enabled) {
+        // 关闭时重置过滤器状态
+        m_speakerRef.clear();
+        m_nlmsW.clear();
+    }
+    emit aecEnabledChanged();
+    qDebug() << "[AudioCallEngine] AEC" << (enabled ? "enabled" : "disabled");
+}
+
+// ―― NLMS 自适应回声消除 ――――――――――――――――――――――――――――――――――――――――――――――――――――――
+//
+// 使用 NLMS 自适滤波器从麦克风信号中消除扪声器产生的回声。
+// 输入： wire 格式的单声道 PCM16 48kHz
+// 参考：m_speakerRef（扪声器历史播放数据）
+// 输出：回声消除后的 PCM16
+QByteArray AudioCallEngine::applyAec(const QByteArray &wirePcm16)
+{
+    const int n = wirePcm16.size() / 2;
+    if (n == 0) return wirePcm16;
+
+    const int refSize = m_speakerRef.size() / 2;  // 参考缓冲区样本数
+    // 需要足够的参考数据才开始过滤（热启动期）
+    if (refSize < kAecDelay + n + kAecTaps) return wirePcm16;
+
+    if (static_cast<int>(m_nlmsW.size()) != kAecTaps)
+        m_nlmsW.assign(kAecTaps, 0.0f);
+
+    const qint16 *refData = reinterpret_cast<const qint16 *>(m_speakerRef.constData());
+    const qint16 *micData = reinterpret_cast<const qint16 *>(wirePcm16.constData());
+
+    QByteArray output(wirePcm16.size(), 0);
+    qint16 *out = reinterpret_cast<qint16 *>(output.data());
+
+    // 对于当前帧第 i 个样本，回声来自 kAecDelay 之前的参考链
+    // refHead[i] = refSize - kAecDelay - n + i（对应最新的参考样本索引）
+    for (int i = 0; i < n; i++) {
+        const int refHead = refSize - kAecDelay - n + i; // 过滤器指向的最新参考样本
+        const int refTail = refHead - kAecTaps + 1;     // 最旧参考样本
+        if (refTail < 0) { out[i] = micData[i]; continue; } // 超界保护
+
+        const qint16 *x = refData + refTail; // x[0]=最旧, x[kAecTaps-1]=最新
+
+        // 计算回声估计并更新权重（平均功率 + NLMS 更新）
+        float y = 0.0f, power = 0.0f;
+        for (int j = 0; j < kAecTaps; j++) {
+            const float xj = x[j] / 32768.0f;
+            y     += m_nlmsW[j] * xj;
+            power += xj * xj;
+        }
+        const float d  = micData[i] / 32768.0f;
+        const float e  = d - y;  // 背景峥向信号（已消除回声）
+        const float mu = kAecMu / (power + 1e-6f); // 归一化步长
+        for (int j = 0; j < kAecTaps; j++) {
+            m_nlmsW[j] += mu * e * (x[j] / 32768.0f);
+        }
+        out[i] = static_cast<qint16>(qBound(-32768.0f, e * 32768.0f, 32767.0f));
+    }
+    return output;
 }
 
 void AudioCallEngine::setMuted(bool muted)
 {
     if (m_muted == muted) return;
     m_muted = muted;
-    // 静音：将采集音量设为 0；取消静音：恢复 1.0
-    if (m_source) {
+    if (m_source)
         m_source->setVolume(muted ? 0.0f : 1.0f);
-    }
     emit mutedChanged();
 }
 
@@ -424,22 +611,37 @@ void AudioCallEngine::onCaptureReady()
     const QByteArray raw = m_captureDevice->readAll();
     if (raw.isEmpty() || m_ws.state() != QAbstractSocket::ConnectedState) return;
 
-    // 如果采集格式已是协议格式（8kHz Int16 单声道）则直接发送；否则转换
+    // 统一转换为 wire 格式（Int16 48kHz 单声道）
     const QAudioFormat wire = audioFormat();
+    QByteArray wirePcm16;
     if (m_captureFormat == wire) {
-        m_ws.sendBinaryMessage(raw);
+        wirePcm16 = raw;
     } else {
-        const QByteArray pcm16 = convertToWire(raw, m_captureFormat);
-        if (!pcm16.isEmpty()) m_ws.sendBinaryMessage(pcm16);
+        wirePcm16 = convertToWire(raw, m_captureFormat);
+        if (wirePcm16.isEmpty()) return;
     }
+
+    // 应用回声消除（NLMS）
+    if (m_aecEnabled)
+        wirePcm16 = applyAec(wirePcm16);
+
+    m_ws.sendBinaryMessage(wirePcm16);
 }
 
 void AudioCallEngine::onAudioFrame(const QByteArray &data)
 {
-    // 简单 VAD：基于原始 8kHz Int16 数据计算 RMS
+    // 简单 VAD：基于原始 Int16 数据计算 RMS
     emit peerSpeaking(rms(data) > 500);
 
     if (!m_ringBuffer || data.isEmpty()) return;
+
+    // 将 wire 格式数据保入 AEC 参考缓冲区（放音的历史信号）
+    if (m_aecEnabled) {
+        m_speakerRef.append(data);
+        const int maxBytes = kAecRefMax * 2; // Int16 = 2 bytes/样本
+        if (m_speakerRef.size() > maxBytes)
+            m_speakerRef.remove(0, m_speakerRef.size() - maxBytes);
+    }
 
     // 转换后推入环形缓冲区（sink 以 pull 模式自行拉取）
     const QAudioFormat wire = audioFormat();
@@ -495,6 +697,47 @@ void AudioCallEngine::stopRingtone()
         m_ringtoneBuffer = nullptr;
     }
     m_ringSamplePos = 0;
+}
+
+// ―― Sink 看门狗 ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
+//
+// Realtek 等驱动在 WASAPI 共享模式下三种静默无声情形：
+//  1. StoppedState  → stop() 被驱动内部调用，需要重新 start()
+//  2. SuspendedState→ 设备被系统挂起，需要 resume()
+//  3. IdleState 持续超 1s → ring buffer 一直为空时 sink 进入 Idle，
+//     此时驱动停止向硬件输出，数据到来后无法自动恢复（Realtek 特有行为）
+//     → 送一帧静音数据 "唤醒" sink，使其重新进入 ActiveState
+void AudioCallEngine::onSinkWatchdog()
+{
+    if (!m_active || !m_sink || !m_ringBuffer) return;
+    const QAudio::State state = m_sink->state();
+    const QAudio::Error err   = m_sink->error();
+
+    if (state == QAudio::StoppedState) {
+        qWarning() << "[Watchdog] sink Stopped err=" << err << ", restarting";
+        m_sinkIdleTicks = 0;
+        m_ringBuffer->clear();
+        m_sink->start(m_ringBuffer);
+    } else if (state == QAudio::SuspendedState) {
+        qWarning() << "[Watchdog] sink Suspended, resuming";
+        m_sinkIdleTicks = 0;
+        m_sink->resume();
+    } else if (state == QAudio::IdleState) {
+        ++m_sinkIdleTicks;
+        // IdleState 持续 > 1s（约 3 个 tick）且 ring buffer 有数据时，强制送一帧静音唤醒
+        if (m_sinkIdleTicks >= 3) {
+            qWarning() << "[Watchdog] sink stuck in Idle for" << (m_sinkIdleTicks * 300) << "ms, nudging";
+            m_sinkIdleTicks = 0;
+            // 送 20ms 静音推动 sink 从 Idle → Active
+            const int silenceBytes = static_cast<int>(
+                m_playbackFormat.sampleRate() * m_playbackFormat.channelCount()
+                * bytesPerSample(m_playbackFormat.sampleFormat()) * 0.02f);
+            if (silenceBytes > 0)
+                m_ringBuffer->push(QByteArray(silenceBytes, 0));
+        }
+    } else {
+        m_sinkIdleTicks = 0; // ActiveState → 正常，重置计数
+    }
 }
 
 void AudioCallEngine::onRingtoneTick()

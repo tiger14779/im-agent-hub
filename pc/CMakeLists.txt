@@ -52,6 +52,7 @@ set(QML_FILES
     qml/components/MessageBubble.qml
     qml/components/ImageViewer.qml
     qml/components/VoiceCallWindow.qml
+    qml/components/AudioDevicePicker.qml
 )
 
 qt_add_executable(${PROJECT_NAME}

@@ -32,7 +32,7 @@ Rectangle {
         recorder: MediaRecorder {
             id: audioRecorder
             mediaFormat {
-                fileType: MediaFormat.Wave
+                fileFormat: MediaFormat.Wave
             }
             onRecorderStateChanged: {
                 if (recorderState === MediaRecorder.StoppedState && chatInput._recActive) {

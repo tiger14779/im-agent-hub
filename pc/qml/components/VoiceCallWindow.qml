@@ -29,6 +29,8 @@ Item {
     property bool   _speaking: false
     property int    _secs:     0
     property string _timerStr: "00:00"
+    property int    _inputIdx:  0    // 麦克风设备索引（0 = 系统默认）
+    property int    _outputIdx: 0    // 扬声器设备索引（0 = 系统默认）
 
     // AudioCallEngine 对端说话状态
     Connections {
@@ -96,7 +98,7 @@ Item {
 
     Window {
         id: callDialog
-        width: 300; height: 390
+        width: 300; height: 490
         flags:    Qt.Window | Qt.WindowStaysOnTopHint | Qt.WindowTitleHint | Qt.WindowCloseButtonHint
         modality: Qt.NonModal
         color: "#0f0f1c"
@@ -227,6 +229,15 @@ Item {
                 }
                 Label { text: "\u5173\u95ed"; color: "#9ca3af"; font.pixelSize: 12; Layout.alignment: Qt.AlignHCenter }
             }
+
+            // ── 音频设备选择 ──────────────────────────────────────────
+            AudioDevicePicker {
+                Layout.fillWidth: true
+                inputIdx:  root._inputIdx
+                outputIdx: root._outputIdx
+                onInputActivated:  (idx, devId) => { root._inputIdx  = idx }
+                onOutputActivated: (idx, devId) => { root._outputIdx = idx }
+            }
         }
     }
 
@@ -235,7 +246,7 @@ Item {
     Rectangle {
         id: activePanel
         visible: root.phase === "active"
-        width: 310; height: 400
+        width: 310; height: 460
         radius: 14
         color: "#0f0f1c"
         border.color: "#667eea"; border.width: 1.5
@@ -377,6 +388,21 @@ Item {
                     Label { text: "\u6302\u65ad"; color: "#9ca3af"; font.pixelSize: 11; Layout.alignment: Qt.AlignHCenter }
                 }
             }
+
+            // ── 通话中切换设备（即时生效，无需挂断重拨）───────────────
+            AudioDevicePicker {
+                Layout.fillWidth: true
+                inputIdx:  root._inputIdx
+                outputIdx: root._outputIdx
+                onInputActivated: (idx, devId) => {
+                    root._inputIdx = idx
+                    AudioCallEngine.changeInputDevice(devId)
+                }
+                onOutputActivated: (idx, devId) => {
+                    root._outputIdx = idx
+                    AudioCallEngine.changeOutputDevice(devId)
+                }
+            }
         }
     }
 
@@ -392,7 +418,9 @@ Item {
         _timerStr = "00:00"
         _muted    = false
         _speaking = false
-        AudioCallEngine.start(audioWsBase, HttpClient.baseUrl, roomId, audioToken)
+        const inputId  = _inputIdx  === 0 ? "" : AudioCallEngine.inputDeviceId(_inputIdx  - 1)
+        const outputId = _outputIdx === 0 ? "" : AudioCallEngine.outputDeviceId(_outputIdx - 1)
+        AudioCallEngine.start(audioWsBase, HttpClient.baseUrl, roomId, audioToken, inputId, outputId)
         phase = "active"
     }
 

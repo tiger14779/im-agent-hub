@@ -126,12 +126,15 @@ int main(int argc, char *argv[])
         });
     });
 
-    // 将 qDebug 输出重定向到与 exe 同目录的日志文件
-    g_logFile = new QFile(QCoreApplication::applicationDirPath() + "/pc_debug.log");
+    // 将 qDebug 输出重定向到桌面的日志文件（方便远程用户发送给开发者排查）
+    const QString logPath = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation)
+                            + "/im_agent_hub_debug.log";
+    g_logFile = new QFile(logPath);
     g_logFile->open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text);
     qInstallMessageHandler(fileMessageHandler);
 
     qDebug() << "启动 IM Agent Hub PC 客户端...";
+    qDebug() << "日志文件:" << logPath;
 
     QQuickStyle::setStyle("Basic");
 
