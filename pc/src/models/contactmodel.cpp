@@ -235,6 +235,26 @@ void ContactModel::clearUnread(const QString &userId)
     emit totalUnreadChanged();
 }
 
+void ContactModel::removeById(const QString &userId)
+{
+    int idx = findByUserId(userId);
+    if (idx < 0) return;
+    int fRow = filteredRow(idx);
+    // 从过滤索引中移除可见行
+    if (fRow >= 0) {
+        beginRemoveRows(QModelIndex(), fRow, fRow);
+        m_filteredIndices.removeAt(fRow);
+        endRemoveRows();
+    }
+    // 从原始数组删除，并把过滤索引中所有 > idx 的值减 1
+    m_contacts.removeAt(idx);
+    for (int &fi : m_filteredIndices) {
+        if (fi > idx) --fi;
+    }
+    emit countChanged();
+    emit totalUnreadChanged();
+}
+
 void ContactModel::clear()
 {
     beginResetModel();

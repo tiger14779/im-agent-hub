@@ -75,6 +75,8 @@ public:
                                   const QString &avatarUrl = {});
     // 添加或更新群组条目（必定标记 isGroup=true）
     Q_INVOKABLE void addOrUpdateAsGroup(const QString &groupId, const QString &name, int memberCount = 0, const QString &avatarUrl = {});
+    // 按 userId 删除条目（群解散时使用）
+    Q_INVOKABLE void removeById(const QString &userId);
     // 更新联系人昵称
     Q_INVOKABLE void updateNickname(const QString &userId, const QString &nickname);
     // 更新联系人头像

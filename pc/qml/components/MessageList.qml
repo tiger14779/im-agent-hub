@@ -9,10 +9,9 @@ ListView {
     spacing: 4
     verticalLayoutDirection: ListView.TopToBottom
 
-    // 初始化期间隐藏列表（等待滚到底后再显示），避免用户看到从顶跳到底的闪烁
+    // 初始化期间隐藏列表，防止会话切换时用户看到从顶跳到底的闪烁
     property bool _initializing: false
     opacity: _initializing ? 0 : 1
-    // 无淡入动画，直接显示
 
     property string selfId: ""          // 当前用户ID，用于判断消息方向
     property string peerAvatarUrl: ""   // 对方头像URL
@@ -28,111 +27,114 @@ ListView {
     // 抑制自动滚动（合并同步期间设为 true，避免干扰用户浏览）
     property bool suppressAutoScroll: false
 
-    // 记录是否用户主动向上滚动（用来决定新消息是否自动滚到底部）
-    property bool _userScrolledUp: false
-    // 加载更多前记录的 contentHeight，用于恢复滚动位置
-    property real _prevContentHeight: 0
-    // 上次 count，用于区分 prepend（头部加载）和 append（新消息）
-    property int _prevCount: 0
-    // 需要滚到底部的标志（跨越 clear→append 两步操作）
-    property bool _needScrollToEnd: false
+    // ── 滚动状态（Telegram 风格）───────────────────────────
+    // 用户是否在列表底部附近（决定收到对方新消息时是否自动滚底）
+    property bool _atBottom: true
+    // 防止向上滚动时重复触发 loadMore
+    property bool _loadMoreTriggered: false
+    // load more 触发前记录的第一个可见 item 的 index（用于 positionViewAtIndex 恢复位置）
+    property int  _anchorIndex: 0
+    // load more 触发前的 count（用于计算插入了多少条，进而计算新的 anchorIndex）
+    property int  _countBeforeLoad: -1
+    // scrollToBottomAndReveal 重试计数（逐帧重试，等 delegate 渲染完成）
+    property int _revealAttempts: 0
 
-    // 补偿定时器：delegate 异步渲染后多次确认滚到底部
-    // 最多重试6次（共 ~100ms），到底后立即停止
-    Timer {
-        id: _scrollFixTimer
-        interval: 16   // 一帧（16ms，原 80ms 导致首次显示时有明显感知延迟）
-        repeat: true
-        property int _retries: 0
+    // ── 公开方法：供 ChatPage 调用 ─────────────────────────
 
-        // 停止并解除初始化隐藏（触发淡入）
-        function stopAndReveal() {
-            stop()
-            msgList._initializing = false
-        }
-
-        onTriggered: {
-            _retries++
-            if (_retries > 6 || _userScrolledUp || suppressAutoScroll) {
-                stopAndReveal()
-                return
-            }
-            msgList.positionViewAtEnd()
-            // 已到底则停止
-            if (contentHeight > 0 && contentHeight <= height + 10) {
-                stopAndReveal()
-            } else if (contentHeight > height && (contentY + height + 5) >= contentHeight) {
-                stopAndReveal()
-            }
-        }
-        function begin() {
-            _retries = 0
-            restart()
-        }
-    }
-
-    onCountChanged: {
-        var added = count - _prevCount
-        _prevCount = count
-
+    // 会话打开/切换时调用：隐藏列表，定位到底部后显示
+    function scrollToBottomAndReveal() {
+        _atBottom = true
         if (count === 0) {
-            // clear() 或 model reset —— 重置所有滚动状态，标记需要滚底
-            _prevContentHeight = 0
-            _userScrolledUp = false
-            _needScrollToEnd = true
-            _initializing = true  // 隐藏列表，等待重新滚到底后淡入，避免从顶跳到底的闪烁
-        } else if (_needScrollToEnd) {
-            // clear 后紧接而来的 append/prepend —— 初次加载，滚到底部
-            _needScrollToEnd = false
-            _prevContentHeight = 0
+            _initializing = false
+            return
+        }
+        _initializing = true
+        _revealAttempts = 5
+        _doReveal()
+    }
+
+    // 逐帧重试定位到底部，直到真正到达底部或重试耗尽
+    function _doReveal() {
+        msgList.positionViewAtEnd()
+        _initializing = false
+    }
+
+    // 收到对方消息时调用：若用户在底部则跟随，已上滑则不打扰
+    // （完全等同 Telegram：在底部时自动跟随新消息，不在底部时静默追加）
+    function scrollDownOneItem() {
+        if (!_atBottom) return   // 用户已上滑阅读历史，完全不动
+        // 等 delegate 渲染完（contentHeight 更新后）再滚底，避免用旧高度计算偏移
+        Qt.callLater(function() { msgList.positionViewAtEnd() })
+    }
+
+    // 自己发送消息后调用：强制跳到底部
+    function scrollToBottomForSelf() {
+        Qt.callLater(function() { msgList.positionViewAtEnd() })
+    }
+
+    // ── 核心：count 变化时的滚动决策 ──────────────────────
+    onCountChanged: {
+        if (count === 0) {
+            // 模型被清空 —— 重置所有状态
+            _atBottom = true
+            _loadMoreTriggered = false
+            _anchorIndex = 0
+            _countBeforeLoad = -1
+            _initializing = true
+            return
+        }
+
+        if (_countBeforeLoad >= 0 && count > _countBeforeLoad) {
+            // 头部插入了历史消息（load more 完成）
+            // positionViewAtIndex 精确恢复位置，不依赖 contentHeight 估算
+            var insertedCount = count - _countBeforeLoad
+            var targetIndex = _anchorIndex + insertedCount
+            var captured = targetIndex
+            _countBeforeLoad = -1
             Qt.callLater(function() {
-                msgList.positionViewAtEnd()
-                _scrollFixTimer.begin()
+                if (captured < msgList.count)
+                    msgList.positionViewAtIndex(captured, ListView.Beginning)
+                _loadMoreTriggered = false
             })
-        } else if (_prevContentHeight > 0) {
-            // 在头部插入旧消息后，恢复滚动位置
-            Qt.callLater(function() {
-                var delta = contentHeight - _prevContentHeight
-                if (delta > 0) contentY += delta
-                _prevContentHeight = 0
-            })
-        } else {
-            // 新消息追加到尾部：除非用户明确上滚过或合并同步中，否则自动滚到底部
-            if (!_userScrolledUp && !suppressAutoScroll) {
-                // 首次从空 model 填充（如首次打开 app）：同样需要隐藏后淡入
-                if (count === added) _initializing = true
-                Qt.callLater(function() {
-                    msgList.positionViewAtEnd()
-                    _scrollFixTimer.begin()
-                })
-            }
+        }
+        // 尾部追加新消息的滚动由 ChatPage 显式调用:
+        //   对方消息 → scrollDownOneItem()
+        //   自己消息 → scrollToBottomForSelf()
+    }
+
+    // loadingMore（服务器请求）变为 false 时解锁 loadMore 触发器
+    onLoadingMoreChanged: {
+        if (!loadingMore) {
+            _countBeforeLoad = -1   // 清理快照（空结果时 onCountChanged 不会触发）
+            _loadMoreTriggered = false
         }
     }
 
-    // 仅在用户手势（拖拽/滑动）停止后判断是否上滚，
-    // 程序触发的 positionViewAtEnd() 不会触发此信号，彻底避免误判
-    onMovementEnded: {
-        if (contentHeight <= height) {
-            _userScrolledUp = false
-        } else {
-            var atBottom = (contentY + height + 120) >= contentHeight
-            _userScrolledUp = !atBottom
+    // hasMore 变为 false 时同步清理状态
+    onHasMoreChanged: {
+        if (!hasMore) {
+            _loadMoreTriggered = false
+            _countBeforeLoad = -1
         }
     }
 
     onContentYChanged: {
-        // 单向重置：到达底部时重置为 false（覆盖鼠标滚轮回到底部的场景）
-        // 注意：永远不在此处设为 true，避免内容高度增长时的布局调整被误判为用户上滚
-        if (contentHeight > height) {
-            var atBottom = (contentY + height + 120) >= contentHeight
-            if (atBottom) _userScrolledUp = false
+        // 实时更新 _atBottom
+        // 阈值改为 20px：用户只要上滑超过 20px，就视为离开底部，不再自动跟随
+        // （旧阈值 120px 导致用户稍微上滑就被弹回底部）
+        if (contentHeight <= height) {
+            _atBottom = true
         } else {
-            _userScrolledUp = false
+            _atBottom = (contentY + height + 20) >= contentHeight
         }
 
-        // 滚动到顶部附近时触发加载更多
-        if (contentY < 50 && hasMore && !loadingMore && count > 0) {
-            _prevContentHeight = contentHeight
+        // 向上滚到顶部附近 —— 触发加载更多历史消息
+        // 阈值 200px：滚到顶部 2-3 条消息位置就提前加载，不需要滑到绝对顶部
+        if (!_loadMoreTriggered && !loadingMore && hasMore && count > 0 && contentY < 200) {
+            var idx = msgList.indexAt(0, contentY + 1)
+            _anchorIndex = (idx < 0) ? 0 : idx
+            _countBeforeLoad = count
+            _loadMoreTriggered = true
             requestLoadMore()
         }
     }
@@ -190,8 +192,7 @@ ListView {
         })()
 
         onImageLoaded: {
-            if (!msgList._userScrolledUp && !msgList.suppressAutoScroll)
-                _scrollFixTimer.begin()
+            // 图片加载完成不再触发任何滚动，避免历史图片加载时把用户弹回底部
         }
         onDeleteRequested: function(sMsgId, cMsgId) {
             msgList.deleteRequested(sMsgId, cMsgId)

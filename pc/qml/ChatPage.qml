@@ -1451,14 +1451,14 @@ Page {
             _localCacheHasMore = (cached.length >= 20)
             if (minSeq > 0) oldestSeq = minSeq  // 初始化服务器分页起点
             _pendingAfterSeq = maxSeq
-            // 2) 增量模式：只向服务器拉取 seq > maxSeq 的新消息
+            // 2) 显示缓存后立即滚到底部，增量同步在后台进行
+            messageListView.scrollToBottomAndReveal()
             _mergeMode = false
             WsClient.loadHistory(userId, 0, 20, maxSeq)
         } else {
             // 无缓存：先清空旧消息再全量拉取
             chatModel.clear()
             _pendingAfterSeq = 0
-            // 2) 无缓存：全量拉取最新 50 条
             _mergeMode = false
             WsClient.loadHistory(userId)
         }
@@ -1499,13 +1499,14 @@ Page {
             _localCacheHasMore = (cached.length >= 20)
             if (minSeq > 0) oldestSeq = minSeq
             _pendingAfterSeq = maxSeq
+            // 2) 显示缓存后立即滚到底部
+            messageListView.scrollToBottomAndReveal()
             _mergeMode = false
             WsClient.loadHistory("group_" + groupId, 0, 20, maxSeq)
         } else {
             // 无缓存：先清空旧消息再全量拉取
             chatModel.clear()
             _pendingAfterSeq = 0
-            // 从服务器拉取完整数据，替换缓存
             WsClient.loadHistory("group_" + groupId)
         }
     }
@@ -1533,6 +1534,7 @@ Page {
     function sendTextMessage(text) {
         var content = JSON.stringify({"text": text})
         var msgId = chatModel.addPendingMessage(activeChatId, 101, text)
+        messageListView.scrollToBottomForSelf()   // Telegram 行为：自发必滚底
         if (activeChatIsGroup) {
             WsClient.sendGroupMessage(activeGroupId, 101, content, msgId)
             groupModel.updateLastMessage(activeGroupId, text, Date.now())
@@ -1566,7 +1568,12 @@ Page {
                     var sc = moreCached[ci]["seq"] ?? 0
                     if (sc > 0 && (oldestSeq === 0 || sc < oldestSeq)) oldestSeq = sc
                 }
+                var prevCount = chatModel.count
                 chatModel.prependMessages(moreCached)
+                // 若 prependMessages 因全部重复未插入任何条目，countChanged 不会触发
+                // 需手动解锁，否则下次上滑不再触发加载
+                if (chatModel.count === prevCount)
+                    messageListView._loadMoreTriggered = false
                 return
             }
             _localCacheHasMore = false
@@ -1633,10 +1640,12 @@ Page {
             }
             groupsData = clean
             groupModel.loadFromJson(groups, true)
-            // 同步群组到聊天列表（tab 0）
+            // 同步群组到聊天列表（tab 0）：未解散的 addOrUpdate，已解散的从 contactModel 移除
             for (var k = 0; k < clean.length; k++) {
                 if (!clean[k].dissolved) {
                     contactModel.addOrUpdateAsGroup(clean[k].id, clean[k].name, clean[k].memberCount, clean[k].avatar || "")
+                } else {
+                    contactModel.removeById(clean[k].id)
                 }
             }
             // 若群信息抽屉已打开，刷新成员数据
@@ -1780,6 +1789,7 @@ Page {
                 _pendingAudioDuration = 0
                 var voiceContent = JSON.stringify({"url": url, "duration": dur})
                 var voiceMsgId = chatModel.addPendingMessage(activeChatId, 103, "", resolveUrl(url), "", 0, dur)
+                messageListView.scrollToBottomForSelf()
                 if (activeChatIsGroup) {
                     WsClient.sendGroupMessage(activeGroupId, 103, voiceContent, voiceMsgId)
                     groupModel.updateLastMessage(activeGroupId, "[\u8BED\u97F3]", Date.now())
@@ -1808,6 +1818,7 @@ Page {
                     "snapshotPicture": {"url": url, "width": 0, "height": 0, "size": 0, "type": "image/png"}
                 })
                 var imgMsgId = chatModel.addPendingMessage(activeChatId, 102, "", resolveUrl(url))
+                messageListView.scrollToBottomForSelf()
                 if (activeChatIsGroup) {
                     WsClient.sendGroupMessage(activeGroupId, 102, imgContent, imgMsgId)
                     groupModel.updateLastMessage(activeGroupId, "[\u56FE\u7247]", Date.now())
@@ -1827,6 +1838,7 @@ Page {
                     "url": url, "name": origName, "size": origSize
                 })
                 var fileMsgId = chatModel.addPendingMessage(activeChatId, 105, "", resolveUrl(url), origName, origSize)
+                messageListView.scrollToBottomForSelf()
                 if (activeChatIsGroup) {
                     WsClient.sendGroupMessage(activeGroupId, 105, fileContent, fileMsgId)
                     groupModel.updateLastMessage(activeGroupId, "[\u6587\u4EF6]", Date.now())
@@ -1927,6 +1939,9 @@ Page {
             if (peerID === activeChatId) {
                 chatModel.appendMessage(chatMsg)
                 console.log("[ChatPage] appendMessage done, new count=" + chatModel.count)
+                // 对方消息：向下滑动一条消息的距离，不打断用户查看历史
+                if (sendID !== staffUserId)
+                    messageListView.scrollDownOneItem()
             }
 
             // 保存到本地缓存
@@ -2064,28 +2079,33 @@ Page {
 
             if (_mergeMode) {
                 // 合并模式（重连/定时同步）：仅追加新消息，appendMessage 内置去重
-                // _mergeMode 保持 true 直到操作完成，suppressAutoScroll 绑定此值
+                // suppressAutoScroll=true 防止追加时自动滚底干扰用户阅读
+                var wasAtBottom = messageListView._atBottom  // 记录同步前用户是否在底部
                 var mergedCount = 0
                 var beforeCount = chatModel.count
                 for (var j = 0; j < parsed.length; j++) {
                     chatModel.appendMessage(parsed[j])
                 }
                 mergedCount = chatModel.count - beforeCount
-                _mergeMode = false  // 所有追加完成后才重置
+                _mergeMode = false  // 所有追加完成后才重置（suppressAutoScroll 随之 false）
                 if (mergedCount > 0) {
                     console.log("[ChatPage] sync merged", mergedCount, "new messages")
+                    // 用户同步前在底部 → 同步后恢复到底部（不打扰正在上滑阅读的用户）
+                    if (wasAtBottom)
+                        Qt.callLater(function() { messageListView.positionViewAtEnd() })
                 }
                 return
             }
 
             hasMoreHistory = hasMore
             if (loadingMore) {
-                // 向上加载更多：批量插入到列表头部
+                // 向上加载更多：批量插入到列表头部（MessageList 的 _heightBeforeLoadMore 已锁定快照）
                 chatModel.prependMessages(parsed)
                 loadingMore = false
             } else {
-                // 初次加载：智能替换（相同结构只更新数据不动布局，不同结构才清空重建）
+                // 初次加载：智能替换后滚到底部显示
                 chatModel.replaceAll(parsed)
+                messageListView.scrollToBottomAndReveal()
             }
         }
 
@@ -2190,8 +2210,11 @@ Page {
             }
 
             if (groupId === activeChatId && activeChatIsGroup) {
-                if (!chatModel.hasMessage(chatMsg["clientMsgID"]))
+                if (!chatModel.hasMessage(chatMsg["clientMsgID"])) {
                     chatModel.appendMessage(chatMsg)
+                    // 群对方消息：向下滑动一条消息的距离
+                    messageListView.scrollDownOneItem()
+                }
             }
 
             // 播放提示音（自己发的不提示）
@@ -2243,6 +2266,9 @@ Page {
         // 群被解散
         function onGroupDissolved(groupId) {
             console.log("[ChatPage] groupDissolved:", groupId)
+            // 立即从两个 model 移除，不等 getGroups 返回
+            groupModel.removeById(groupId)
+            contactModel.removeById(groupId)
             if (groupId === activeChatId && activeChatIsGroup) {
                 activeChatId = ""
                 activeChatIsGroup = false

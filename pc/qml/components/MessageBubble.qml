@@ -14,9 +14,15 @@ Item {
     property int contentType: 101      // 消息类型: 101=文本, 102=图片, 103=语音, 105=文件
     property string textContent: ""    // 文本内容
     property string imageUrl: ""       // 图片/文件/语音URL
-    // 稳定的图片URL：只在收到非空值时更新，防止 status role 变化时反复重加载
+    // 稳定的图片URL：初次赋值后锁定，图片渲染完成后不再响应 URL 变更
+    // 防止 onMediaDownloaded 把网络URL换成本地路径时导致图片重新加载闪烁
     property string _stableImageUrl: ""
-    onImageUrlChanged: { if (imageUrl.length > 0) _stableImageUrl = imageUrl }
+    property bool _imageHasRendered: false   // 图片是否已成功渲染过一次
+    onImageUrlChanged: {
+        // 仅在图片尚未渲染时才更新稳定URL（已渲染则保留当前画面，避免闪烁）
+        if (imageUrl.length > 0 && !_imageHasRendered)
+            _stableImageUrl = imageUrl
+    }
     property string fileName: ""       // 文件名
     property real fileSize: 0          // 文件大小（字节）
     property int voiceDuration: 0      // 语音时长（秒）
@@ -230,8 +236,10 @@ Item {
                                 : 120
 
                         onStatusChanged: {
-                            if (status === Image.Ready)
+                            if (status === Image.Ready) {
+                                bubble._imageHasRendered = true  // 锁定：后续 URL 变更不再触发重加载
                                 bubble.imageLoaded()
+                            }
                         }
 
                         // 双击放大查看 / 拖拽保存到电脑
