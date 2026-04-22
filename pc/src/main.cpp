@@ -16,6 +16,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkDiskCache>
 #include <QStandardPaths>
+#include "network/avatarprovider.h"
 
 // 全局日志文件，将 qDebug 输出重定向到文件
 static QFile *g_logFile = nullptr;
@@ -142,6 +143,10 @@ int main(int argc, char *argv[])
     CachedNamFactory namFactory;
     QQmlApplicationEngine engine;
     engine.setNetworkAccessManagerFactory(&namFactory);
+
+    // 头像图片提供者：image://avatar/<完整URL> —— 内存 LRU 复用 QImage，
+    // 列表回收 delegate 后再滑回不需要重新下载/解码
+    engine.addImageProvider(QStringLiteral("avatar"), new AvatarProvider());
 
     // 确保 QML 引擎能找到 Qt 自带的 QML 模块（如 QtMultimedia）
     // 从 build 目录运行时，QLibraryInfo 路径是相对于 exe 的，

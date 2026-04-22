@@ -377,6 +377,16 @@ void ContactModel::setFilterText(const QString &text)
 
 void ContactModel::rebuildFilter()
 {
+    // 重排底层数组：群组始终置顶，然后按最后消息时间降序。
+    // 修复：搜索状态下发送消息只更新了 m_filteredIndices，
+    // 退出搜索后 rebuildFilter 必须重新对 m_contacts 排序，
+    // 否则刚发过消息的联系人会停留在底部。
+    std::stable_sort(m_contacts.begin(), m_contacts.end(),
+                     [](const Contact &a, const Contact &b) {
+        if (a.isGroup != b.isGroup) return a.isGroup > b.isGroup;
+        return a.lastTime > b.lastTime;
+    });
+
     m_filteredIndices.clear();
     for (int i = 0; i < m_contacts.size(); ++i) {
         if (m_filterText.isEmpty()

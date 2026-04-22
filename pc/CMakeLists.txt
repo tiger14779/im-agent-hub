@@ -13,6 +13,7 @@ find_package(Qt6 6.7 REQUIRED COMPONENTS
     WebSockets
     Multimedia
     Sql
+    Concurrent
 )
 
 qt_standard_project_setup(REQUIRES 6.7)
@@ -26,6 +27,7 @@ set(SOURCES
     src/network/wsclient.cpp
     src/network/wxbridge.cpp
     src/network/audiocallengine.cpp
+    src/network/avatarprovider.cpp
     src/database/messagecache.cpp
 )
 
@@ -36,6 +38,7 @@ set(HEADERS
     src/network/wsclient.h
     src/network/wxbridge.h
     src/network/audiocallengine.h
+    src/network/avatarprovider.h
     src/database/messagecache.h
 )
 
@@ -82,6 +85,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt6::WebSockets
     Qt6::Multimedia
     Qt6::Sql
+    Qt6::Concurrent
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE

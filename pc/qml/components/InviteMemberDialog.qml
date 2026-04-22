@@ -169,6 +169,9 @@ Dialog {
                             }
                             visible: status === Image.Ready
                             fillMode: Image.PreserveAspectCrop
+                            sourceSize: Qt.size(64, 64)
+                            asynchronous: true
+                            cache: true
                         }
                         Label {
                             anchors.centerIn: parent

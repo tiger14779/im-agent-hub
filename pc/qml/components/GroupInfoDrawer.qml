@@ -192,7 +192,26 @@ Drawer {
             anchors.right: parent.right
             anchors.bottom: dissolveBar.top
             clip: true
+            boundsBehavior: Flickable.StopAtBounds
             model: memberListModel
+
+            // 可拖动的垂直滚动条
+            ScrollBar.vertical: ScrollBar {
+                id: memberScrollBar
+                policy: ScrollBar.AsNeeded
+                active: true
+                interactive: true
+                width: 10
+                hoverEnabled: true
+                contentItem: Rectangle {
+                    implicitWidth: 8
+                    radius: 4
+                    color: memberScrollBar.pressed ? "#888"
+                          : (memberScrollBar.hovered ? "#aaa" : "#c0c0c0")
+                    opacity: memberScrollBar.active ? 1.0 : 0.0
+                    Behavior on opacity { NumberAnimation { duration: 150 } }
+                }
+            }
 
             delegate: Rectangle {
                 id: memberDelegate
@@ -251,6 +270,9 @@ Drawer {
                             }
                             visible: status === Image.Ready
                             fillMode: Image.PreserveAspectCrop
+                            sourceSize: Qt.size(60, 60)
+                            asynchronous: true
+                            cache: true
                         }
                         Label {
                             anchors.centerIn: parent

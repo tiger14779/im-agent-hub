@@ -6,6 +6,25 @@ import QtQuick.Layouts
 ListView {
     id: contactList
     clip: true
+    boundsBehavior: Flickable.StopAtBounds
+
+    // 可拖动的垂直滚动条（始终保留位置，鼠标悬停高亮）
+    ScrollBar.vertical: ScrollBar {
+        id: contactScrollBar
+        policy: ScrollBar.AsNeeded
+        active: true
+        interactive: true
+        width: 10
+        hoverEnabled: true
+        contentItem: Rectangle {
+            implicitWidth: 8
+            radius: 4
+            color: contactScrollBar.pressed ? "#888"
+                  : (contactScrollBar.hovered ? "#aaa" : "#c0c0c0")
+            opacity: contactScrollBar.active ? 1.0 : 0.0
+            Behavior on opacity { NumberAnimation { duration: 150 } }
+        }
+    }
 
     property string activeUserId: ""   // 当前选中的联系人ID
     property string serverUrl: ""      // 服务器地址（用于拼接头像URL）
@@ -100,14 +119,18 @@ ListView {
                     anchors.fill: parent
                     source: {
                         var url = avatarUrl || ""
-                        if (url.length > 0 && url.charAt(0) === '/')
-                            return contactList.serverUrl + url
-                        return url
+                        if (url.length === 0) return ""
+                        if (url.charAt(0) === '/')
+                            url = contactList.serverUrl + url
+                        // 走 C++ AvatarProvider：按 URL 维护内存 LRU，
+                        // 滑动列表反复回收/重建 delegate 不会重新下载或重新解码
+                        return "image://avatar/" + url
                     }
                     visible: status === Image.Ready
                     fillMode: Image.PreserveAspectCrop
-                    layer.enabled: true
-                    layer.effect: null
+                    sourceSize: Qt.size(80, 80)
+                    asynchronous: true
+                    cache: true
                 }
 
                 Label {

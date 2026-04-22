@@ -1738,6 +1738,7 @@ Page {
                     var bImgMsgId = ""
                     if (bridgeTarget === activeChatId) {
                         bImgMsgId = chatModel.addPendingMessage(bridgeTarget, 102, "", resolveUrl(url))
+                        messageListView.scrollToBottomForSelf()   // 自发消息：滚动到底部
                     } else {
                         bImgMsgId = chatModel.generateMsgId()
                     }
@@ -1759,6 +1760,7 @@ Page {
                     var bFileMsgId = ""
                     if (bridgeTarget === activeChatId) {
                         bFileMsgId = chatModel.addPendingMessage(bridgeTarget, 105, "", resolveUrl(url), origName, origSize)
+                        messageListView.scrollToBottomForSelf()   // 自发消息：滚动到底部
                     } else {
                         bFileMsgId = chatModel.generateMsgId()
                     }
@@ -2317,6 +2319,7 @@ Page {
             var msgId = ""
             if (wxid === activeChatId) {
                 msgId = chatModel.addPendingMessage(wxid, 101, msg)
+                messageListView.scrollToBottomForSelf()   // 自发消息：滚动到底部
             } else {
                 msgId = chatModel.generateMsgId()
             }

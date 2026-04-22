@@ -64,6 +64,9 @@ Item {
                 source: avatarUrl
                 visible: status === Image.Ready
                 fillMode: Image.PreserveAspectCrop
+                sourceSize: Qt.size(72, 72)
+                asynchronous: true
+                cache: true
             }
 
             Label {

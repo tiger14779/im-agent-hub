@@ -203,6 +203,19 @@ ListView {
     }
 
     ScrollBar.vertical: ScrollBar {
+        id: messageScrollBar
         policy: ScrollBar.AsNeeded
+        active: true
+        interactive: true
+        width: 10
+        hoverEnabled: true
+        contentItem: Rectangle {
+            implicitWidth: 8
+            radius: 4
+            color: messageScrollBar.pressed ? "#888"
+                  : (messageScrollBar.hovered ? "#aaa" : "#c0c0c0")
+            opacity: messageScrollBar.active ? 1.0 : 0.0
+            Behavior on opacity { NumberAnimation { duration: 150 } }
+        }
     }
 }
