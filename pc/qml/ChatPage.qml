@@ -304,21 +304,90 @@ Page {
                 anchors.fill: parent
                 spacing: 0
 
-                // 面板标题栏
+                // 面板标题栏 —— 显示外部彩票数据 + Tab 操作按钮
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 50
+                    Layout.preferredHeight: 64
                     color: "#e7e7e7"
 
                     RowLayout {
                         anchors.fill: parent
                         anchors.leftMargin: 12
                         anchors.rightMargin: 8
+                        spacing: 6
 
-                        Label {
-                            text: currentTab === 0 ? "\u804A\u5929" : currentTab === 1 ? "\u901A\u8BAF\u5F55" : "\u7FA4\u7EC4"
-                            color: "#333"; font.pixelSize: 15; font.bold: true
+                        // 彩票数据显示区（占据原"聊天/通讯录/群组"位置）
+                        ColumnLayout {
                             Layout.fillWidth: true
+                            Layout.alignment: Qt.AlignVCenter
+                            spacing: 4
+
+                            // 第一行：期号 + 球号图片
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 4
+
+                                Label {
+                                    text: LotteryClient.hasData
+                                          ? ("期号: " + LotteryClient.issue)
+                                          : (LotteryClient.connected ? "等待数据..." : "未连接彩票数据")
+                                    color: LotteryClient.hasData ? "#333"
+                                          : (LotteryClient.connected ? "#666" : "#bbb")
+                                    font.pixelSize: 12
+                                    font.bold: true
+                                }
+
+                                // 球号图片串：每个数字字符对应一张 N号球.png
+                                Repeater {
+                                    model: LotteryClient.hasData ? LotteryClient.balls.length : 0
+                                    delegate: Image {
+                                        required property int index
+                                        readonly property string ch: LotteryClient.balls.charAt(index)
+                                        source: /^[0-9]$/.test(ch)
+                                                ? ("qrc:/ImAgentHub/resources/" + ch + "号球.png")
+                                                : ""
+                                        Layout.preferredWidth: 18
+                                        Layout.preferredHeight: 18
+                                        fillMode: Image.PreserveAspectFit
+                                        smooth: true
+                                        sourceSize: Qt.size(36, 36)
+                                    }
+                                }
+
+                                Item { Layout.fillWidth: true }
+                            }
+
+                            // 第二行：未结算 + 倒计时
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 12
+
+                                Label {
+                                    text: "未结算: " + (LotteryClient.hasData
+                                                       ? LotteryClient.unsettled.toFixed(2)
+                                                       : "--")
+                                    color: "#d4380d"
+                                    font.pixelSize: 11
+                                    font.bold: true
+                                }
+
+                                Label {
+                                    function fmtCountdown(s) {
+                                        var m = Math.floor(s / 60)
+                                        var ss = s % 60
+                                        return m + ":" + (ss < 10 ? "0" + ss : ss)
+                                    }
+                                    text: "倒计时: " + (LotteryClient.hasData
+                                                       ? fmtCountdown(LotteryClient.countdown)
+                                                       : "--")
+                                    color: LotteryClient.hasData && LotteryClient.countdown <= 10
+                                           ? "#fa5151" : "#1677ff"
+                                    font.pixelSize: 11
+                                    font.bold: true
+                                }
+
+                                Item { Layout.fillWidth: true }
+                            }
                         }
 
                         // 添加联系人按钮（仅在通讯录Tab显示）
@@ -326,6 +395,7 @@ Page {
                             visible: currentTab === 1
                             width: 28; height: 28; radius: 14
                             flat: true
+                            Layout.alignment: Qt.AlignVCenter
                             contentItem: Label {
                                 text: "+"
                                 font.pixelSize: 18; color: "#555"
@@ -340,6 +410,7 @@ Page {
                             visible: currentTab === 2
                             width: 28; height: 28; radius: 14
                             flat: true
+                            Layout.alignment: Qt.AlignVCenter
                             contentItem: Label {
                                 text: "+"
                                 font.pixelSize: 18; color: "#555"

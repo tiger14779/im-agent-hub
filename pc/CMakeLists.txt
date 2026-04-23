@@ -28,6 +28,7 @@ set(SOURCES
     src/network/wxbridge.cpp
     src/network/audiocallengine.cpp
     src/network/avatarprovider.cpp
+    src/network/lotteryclient.cpp
     src/database/messagecache.cpp
 )
 
@@ -39,6 +40,7 @@ set(HEADERS
     src/network/wxbridge.h
     src/network/audiocallengine.h
     src/network/avatarprovider.h
+    src/network/lotteryclient.h
     src/database/messagecache.h
 )
 
@@ -75,6 +77,16 @@ qt_add_qml_module(${PROJECT_NAME}
     RESOURCES
         resources/notify.wav
         resources/lingsheng.wav
+        resources/0号球.png
+        resources/1号球.png
+        resources/2号球.png
+        resources/3号球.png
+        resources/4号球.png
+        resources/5号球.png
+        resources/6号球.png
+        resources/7号球.png
+        resources/8号球.png
+        resources/9号球.png
     RESOURCE_PREFIX /
 )
 

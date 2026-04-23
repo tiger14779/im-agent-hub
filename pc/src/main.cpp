@@ -17,6 +17,7 @@
 #include <QNetworkDiskCache>
 #include <QStandardPaths>
 #include "network/avatarprovider.h"
+#include "network/lotteryclient.h"
 
 // 全局日志文件，将 qDebug 输出重定向到文件
 static QFile *g_logFile = nullptr;
@@ -136,6 +137,10 @@ int main(int argc, char *argv[])
 
     qDebug() << "启动 IM Agent Hub PC 客户端...";
     qDebug() << "日志文件:" << logPath;
+
+    // 提前创建 LotteryClient 单例 —— 启动后立即连接外部彩票软件，
+    // 不等 QML 引用（登录页阶段也保持连接尝试）
+    (void)LotteryClient::instance();
 
     QQuickStyle::setStyle("Basic");
 
