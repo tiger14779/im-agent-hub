@@ -230,18 +230,90 @@ Item {
 
                 Component {
                     id: imageComponent
-                    Image {
-                        source: bubble._stableImageUrl
-                        fillMode: Image.PreserveAspectFit
-                        width: Math.min(Math.max(sourceSize.width, 60), 220)
-                        height: sourceSize.width > 0
-                                ? width / (sourceSize.width / sourceSize.height)
-                                : 120
+                    Item {
+                        id: imgRoot
+                        // 判定是否为 gif（忽略 URL 上的查询参数与大小写）
+                        readonly property bool isGif: {
+                            var s = bubble._stableImageUrl.toLowerCase()
+                            var qIdx = s.indexOf("?")
+                            if (qIdx >= 0) s = s.substring(0, qIdx)
+                            return s.endsWith(".gif")
+                        }
+                        property Item activeImg: imgLoader.item
+                        readonly property int srcW: activeImg ? activeImg.sourceSize.width : 0
+                        readonly property int srcH: activeImg ? activeImg.sourceSize.height : 0
+                        width: Math.min(Math.max(srcW, 60), 220)
+                        height: srcW > 0 ? width / (srcW / srcH) : 120
 
-                        onStatusChanged: {
-                            if (status === Image.Ready) {
-                                bubble._imageHasRendered = true  // 锁定：后续 URL 变更不再触发重加载
-                                bubble.imageLoaded()
+                        Loader {
+                            id: imgLoader
+                            anchors.fill: parent
+                            sourceComponent: imgRoot.isGif ? animComp : staticComp
+                        }
+
+                        Component {
+                            id: staticComp
+                            Image {
+                                source: bubble._stableImageUrl
+                                fillMode: Image.PreserveAspectFit
+                                asynchronous: true
+                                cache: true
+                                onStatusChanged: {
+                                    if (status === Image.Ready) {
+                                        bubble._imageHasRendered = true
+                                        bubble.imageLoaded()
+                                    }
+                                }
+                                BusyIndicator {
+                                    anchors.centerIn: parent
+                                    running: parent.status === Image.Loading
+                                    visible: running
+                                    width: 24; height: 24
+                                }
+                                Rectangle {
+                                    anchors.fill: parent
+                                    color: "#f0f0f0"
+                                    visible: parent.status === Image.Error
+                                    Label {
+                                        anchors.centerIn: parent
+                                        text: "\u56FE\u7247\u52A0\u8F7D\u5931\u8D25"
+                                        color: "#999"; font.pixelSize: 11
+                                    }
+                                }
+                            }
+                        }
+
+                        Component {
+                            id: animComp
+                            AnimatedImage {
+                                source: bubble._stableImageUrl
+                                fillMode: Image.PreserveAspectFit
+                                playing: true
+                                paused: false
+                                cache: true
+                                asynchronous: true
+                                onStatusChanged: {
+                                    if (status === Image.Ready) {
+                                        bubble._imageHasRendered = true
+                                        bubble.imageLoaded()
+                                    }
+                                }
+                                BusyIndicator {
+                                    anchors.centerIn: parent
+                                    running: parent.status === Image.Loading
+                                    visible: running
+                                    width: 24; height: 24
+                                }
+                                Rectangle {
+                                    anchors.fill: parent
+                                    color: "#f0f0f0"
+                                    visible: parent.status === Image.Error
+                                    Label {
+                                        anchors.centerIn: parent
+                                        text: "\u56FE\u7247\u52A0\u8F7D\u5931\u8D25"
+                                        color: "#999"; font.pixelSize: 11
+                                    }
+                                }
                             }
                         }
 
@@ -276,26 +348,6 @@ Item {
                             onClicked: function(mouse) {
                                 if (mouse.button === Qt.RightButton)
                                     contextMenu.popup()
-                            }
-                        }
-
-                        // 加载中指示器
-                        BusyIndicator {
-                            anchors.centerIn: parent
-                            running: parent.status === Image.Loading
-                            visible: running
-                            width: 24; height: 24
-                        }
-
-                        // 加载失败占位图
-                        Rectangle {
-                            anchors.fill: parent
-                            color: "#f0f0f0"
-                            visible: parent.status === Image.Error
-                            Label {
-                                anchors.centerIn: parent
-                                text: "\u56FE\u7247\u52A0\u8F7D\u5931\u8D25"
-                                color: "#999"; font.pixelSize: 11
                             }
                         }
                     }

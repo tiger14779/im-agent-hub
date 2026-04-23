@@ -113,6 +113,11 @@ public:
     // 返回系统临时目录路径（用于录音等临时文件）
     Q_INVOKABLE QString tempDir() const;
 
+    // 返回 Emoji 表情目录的绝对路径（多个候选路径中第一个存在的）
+    Q_INVOKABLE QString emojiDir() const;
+    // 列出 Emoji 表情目录中的所有图片文件（绝对路径），支持 gif/png/jpg/jpeg/bmp/webp
+    Q_INVOKABLE QStringList listEmojis() const;
+
     // === 通用设置存取 ===
     Q_INVOKABLE void setSetting(const QString &key, const QString &value);
     Q_INVOKABLE QString getSetting(const QString &key, const QString &defaultValue = {});

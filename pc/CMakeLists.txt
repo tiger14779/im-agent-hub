@@ -116,6 +116,7 @@ set(_qt6_qml_import_dir "${_qt6_root}/qml")
 message(STATUS "Qt6 QML import dir: ${_qt6_qml_import_dir}")
 target_compile_definitions(${PROJECT_NAME} PRIVATE
     "QT_QML_IMPORT_DIR=\"${_qt6_qml_import_dir}\""
+    "IMAGENT_EMOJI_SRC_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/Emoji\""
 )
 
 # Windows specific (disabled for debug console output)

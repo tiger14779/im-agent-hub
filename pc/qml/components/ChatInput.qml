@@ -237,6 +237,28 @@ Rectangle {
                 color: "#fa5151"
             }
 
+            // 表情按钮
+            ToolButton {
+                id: emojiBtn
+                width: 28; height: 28
+                contentItem: Label {
+                    text: "\uD83D\uDE00"   // 😀
+                    font.pixelSize: 18
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                ToolTip.text: "\u8868\u60C5"  // 表情
+                ToolTip.visible: hovered
+                onClicked: {
+                    if (emojiPopup.opened) {
+                        emojiPopup.close()
+                    } else {
+                        emojiPopup.refresh()
+                        emojiPopup.open()
+                    }
+                }
+            }
+
             Item { Layout.fillWidth: true }
         }
 
@@ -500,6 +522,108 @@ Rectangle {
             var path = selectedFile.toString()
             if (path.startsWith("file:///")) path = path.substring(8)
             addPendingFile(path, "image")
+        }
+    }
+
+    // 表情选择弹窗 —— 显示 Emoji/ 文件夹中的 gif/png/jpg 等图片
+    Popup {
+        id: emojiPopup
+        width: 360
+        height: 320
+        // 锚定到表情按钮上方
+        x: emojiBtn ? emojiBtn.mapToItem(chatInput, 0, 0).x : 0
+        y: toolBar.y - height - 4
+        padding: 6
+        modal: false
+        focus: true
+        closePolicy: Popup.CloseOnPressOutside | Popup.CloseOnEscape
+
+        property var emojis: []
+
+        function refresh() {
+            emojiPopup.emojis = HttpClient.listEmojis()
+        }
+
+        background: Rectangle {
+            color: "#ffffff"
+            border.color: "#d0d0d0"
+            radius: 6
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 4
+
+            RowLayout {
+                Layout.fillWidth: true
+                Label {
+                    text: "\u8868\u60C5"  // 表情
+                    font.pixelSize: 13
+                    font.bold: true
+                    color: "#333"
+                }
+                Item { Layout.fillWidth: true }
+                Label {
+                    visible: emojiPopup.emojis.length === 0
+                    text: "Emoji \u6587\u4EF6\u5939\u4E3A\u7A7A"  // Emoji 文件夹为空
+                    font.pixelSize: 11
+                    color: "#999"
+                }
+            }
+
+            GridView {
+                id: emojiGrid
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                cellWidth: 64
+                cellHeight: 64
+                clip: true
+                model: emojiPopup.emojis
+
+                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+                delegate: Rectangle {
+                    width: emojiGrid.cellWidth - 4
+                    height: emojiGrid.cellHeight - 4
+                    color: emojiMouse.containsMouse ? "#eef7ee" : "transparent"
+                    border.color: emojiMouse.containsMouse ? "#07c160" : "transparent"
+                    radius: 4
+
+                    // 判断是否 gif：使用 AnimatedImage 动图预览，其它用普通 Image
+                    property bool isGif: modelData.toLowerCase().endsWith(".gif")
+
+                    AnimatedImage {
+                        anchors.fill: parent
+                        anchors.margins: 4
+                        source: parent.isGif ? "file:///" + modelData : ""
+                        visible: parent.isGif
+                        fillMode: Image.PreserveAspectFit
+                        playing: true
+                        cache: true
+                        asynchronous: true
+                    }
+
+                    Image {
+                        anchors.fill: parent
+                        anchors.margins: 4
+                        source: parent.isGif ? "" : "file:///" + modelData
+                        visible: !parent.isGif
+                        fillMode: Image.PreserveAspectFit
+                        cache: true
+                        asynchronous: true
+                    }
+
+                    MouseArea {
+                        id: emojiMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            chatInput.sendImage(modelData)
+                            emojiPopup.close()
+                        }
+                    }
+                }
+            }
         }
     }
 }

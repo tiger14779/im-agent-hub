@@ -20,6 +20,7 @@
 #include <QDrag>
 #include <QWindow>
 #include <QStandardPaths>
+#include <QCoreApplication>
 
 HttpClient::HttpClient(QObject *parent)
     : QObject(parent)
@@ -405,6 +406,39 @@ QString HttpClient::getSetting(const QString &key, const QString &defaultValue)
 QString HttpClient::tempDir() const
 {
     return QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+}
+
+// 在多个候选路径中查找 Emoji 文件夹，返回第一个存在的绝对路径
+QString HttpClient::emojiDir() const
+{
+    const QString appDir = QCoreApplication::applicationDirPath();
+    QStringList candidates;
+    candidates << appDir + "/Emoji"
+               << appDir + "/../Emoji"
+               << appDir + "/../../Emoji";
+#ifdef IMAGENT_EMOJI_SRC_DIR
+    candidates << QString::fromUtf8(IMAGENT_EMOJI_SRC_DIR);
+#endif
+    for (const QString &p : candidates) {
+        QDir d(p);
+        if (d.exists())
+            return QDir::cleanPath(d.absolutePath());
+    }
+    return QString();
+}
+
+QStringList HttpClient::listEmojis() const
+{
+    QStringList result;
+    const QString dirPath = emojiDir();
+    if (dirPath.isEmpty())
+        return result;
+    QDir d(dirPath);
+    const QStringList filters = {"*.gif", "*.png", "*.jpg", "*.jpeg", "*.bmp", "*.webp"};
+    const QFileInfoList files = d.entryInfoList(filters, QDir::Files, QDir::Name);
+    for (const QFileInfo &fi : files)
+        result << QDir::cleanPath(fi.absoluteFilePath());
+    return result;
 }
 
 // ── 剪贴板操作 ─────────────────────────────────────────

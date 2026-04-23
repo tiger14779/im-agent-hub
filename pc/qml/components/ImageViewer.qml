@@ -48,35 +48,72 @@ Popup {
         property real imgX: 0
         property real imgY: 0
 
-        Image {
-            id: img
-            source: viewer.imageSource
-            fillMode: Image.PreserveAspectFit
+        // 是否为 gif（忽略查询参数与大小写）
+        readonly property bool isGif: {
+            var s = (viewer.imageSource || "").toLowerCase()
+            var qIdx = s.indexOf("?")
+            if (qIdx >= 0) s = s.substring(0, qIdx)
+            return s.endsWith(".gif")
+        }
 
-            // 基础尺寸：不超过容器 90%
-            readonly property real baseW: sourceSize.width > 0
-                ? Math.min(sourceSize.width, viewer.width * 0.9) : viewer.width * 0.5
-            readonly property real baseH: sourceSize.width > 0
-                ? baseW / (sourceSize.width / sourceSize.height) : viewer.height * 0.5
+        // 通用尺寸：取自当前激活的图片项 sourceSize
+        property Item activeImg: imgLoader.item
+        readonly property int srcW: activeImg ? activeImg.sourceSize.width : 0
+        readonly property int srcH: activeImg ? activeImg.sourceSize.height : 0
+        readonly property real baseW: srcW > 0
+            ? Math.min(srcW, viewer.width * 0.9) : viewer.width * 0.5
+        readonly property real baseH: srcW > 0
+            ? baseW / (srcW / srcH) : viewer.height * 0.5
 
-            width: baseW * parent.imgScale
-            height: baseH * parent.imgScale
+        Loader {
+            id: imgLoader
+            sourceComponent: parent.isGif ? animComp : staticComp
+            width: parent.baseW * parent.imgScale
+            height: parent.baseH * parent.imgScale
             x: (parent.width - width) / 2 + parent.imgX
             y: (parent.height - height) / 2 + parent.imgY
-            smooth: true
+        }
 
-            BusyIndicator {
-                anchors.centerIn: parent
-                running: img.status === Image.Loading
-                visible: running
+        Component {
+            id: staticComp
+            Image {
+                source: viewer.imageSource
+                fillMode: Image.PreserveAspectFit
+                smooth: true
+                BusyIndicator {
+                    anchors.centerIn: parent
+                    running: parent.status === Image.Loading
+                    visible: running
+                }
+                Label {
+                    anchors.centerIn: parent
+                    text: "\u56FE\u7247\u52A0\u8F7D\u5931\u8D25"
+                    color: "white"; font.pixelSize: 14
+                    visible: parent.status === Image.Error
+                }
             }
+        }
 
-            Label {
-                anchors.centerIn: parent
-                text: "\u56FE\u7247\u52A0\u8F7D\u5931\u8D25"
-                color: "white"
-                font.pixelSize: 14
-                visible: img.status === Image.Error
+        Component {
+            id: animComp
+            AnimatedImage {
+                source: viewer.imageSource
+                fillMode: Image.PreserveAspectFit
+                playing: true
+                paused: false
+                cache: true
+                smooth: true
+                BusyIndicator {
+                    anchors.centerIn: parent
+                    running: parent.status === Image.Loading
+                    visible: running
+                }
+                Label {
+                    anchors.centerIn: parent
+                    text: "\u56FE\u7247\u52A0\u8F7D\u5931\u8D25"
+                    color: "white"; font.pixelSize: 14
+                    visible: parent.status === Image.Error
+                }
             }
         }
 
