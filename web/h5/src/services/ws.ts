@@ -455,6 +455,18 @@ class ChatWsService {
     return clientMsgId
   }
 
+  // 直接以已存在的图片 URL 发送图片消息（如表情包，无需重新上传）
+  sendImageByUrl(recvId: string, url: string, name = 'emoji'): string {
+    const clientMsgId = uuid()
+    this.sendMessage({
+      recvId,
+      contentType: 102,
+      content: JSON.stringify({ url, name, size: 0, type: '' }),
+      clientMsgId
+    })
+    return clientMsgId
+  }
+
   async sendVoiceMessage(recvId: string, blob: Blob, duration: number): Promise<string> {
     const url = await this.uploadFile(new File([blob], 'voice.webm', { type: blob.type }))
     const clientMsgId = uuid()
@@ -510,6 +522,29 @@ class ChatWsService {
       groupId,
       contentType: 102,
       content: JSON.stringify({ url, name: file.name, size: file.size, type: file.type }),
+      clientMsgId
+    })
+    if (!sent) {
+      setTimeout(() => this.onAck({ clientMsgId, status: 3, error: '连接已断开，请稍后重试' }), 0)
+    } else {
+      const timer = setTimeout(() => {
+        if (this.pendingGroupTimers.has(clientMsgId)) {
+          this.pendingGroupTimers.delete(clientMsgId)
+          this.onAck({ clientMsgId, status: 3, error: '发送超时' })
+        }
+      }, ChatWsService.ACK_TIMEOUT)
+      this.pendingGroupTimers.set(clientMsgId, timer)
+    }
+    return clientMsgId
+  }
+
+  // 直接以已存在的图片 URL 发送群图片消息（如表情包，无需重新上传）
+  sendGroupImageByUrl(groupId: string, url: string, name = 'emoji'): string {
+    const clientMsgId = uuid()
+    const sent = this.send('send_group_message', {
+      groupId,
+      contentType: 102,
+      content: JSON.stringify({ url, name, size: 0, type: '' }),
       clientMsgId
     })
     if (!sent) {

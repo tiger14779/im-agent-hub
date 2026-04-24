@@ -70,10 +70,12 @@
       <!-- Chat input -->
       <ChatInput
         :show-call="!activeConversationIsGroup"
+        :user-id="userStore.userId"
         @send-text="onSendText"
         @send-image="onSendImage"
         @send-file="onSendFile"
         @send-voice="onSendVoice"
+        @send-emoji="onSendEmoji"
         @start-call="onStartCall"
       />
     </template>
@@ -514,6 +516,36 @@ async function onSendImage(file: File) {
       ? await chatWs.sendGroupImageMessage(peerId, file)
       : await chatWs.sendImageMessage(peerId, file)
     // Update temp msg's clientMsgID to the real one for ACK matching
+    const msg = chatStore.messages.find(m => m.clientMsgID === tempMsgID)
+    if (msg) msg.clientMsgID = realId
+  } catch (err) {
+    chatStore.updateMessageStatus(tempMsgID, 3)
+  }
+}
+
+// 发送表情（已是服务器 URL，无需上传，直接走图片消息通道）
+function onSendEmoji({ url, name }: { url: string; name: string }) {
+  const peerId = activeConversation.value || serviceIdRef.value
+  if (!peerId) return
+  const isGroup = activeConversationIsGroup.value
+  const tempMsgID = `tmp_${Date.now()}`
+  const tempMsg: Message = {
+    clientMsgID: tempMsgID,
+    sendID: userStore.userId,
+    recvID: peerId,
+    sessionType: 1,
+    contentType: 102,
+    content: '',
+    pictureContent: { snapshotPicture: { url } },
+    sendTime: Date.now(),
+    status: 1,
+    ...(isGroup ? { isGroup: true } : {})
+  }
+  chatStore.addMessage(tempMsg)
+  try {
+    const realId = isGroup
+      ? chatWs.sendGroupImageByUrl(peerId, url, name)
+      : chatWs.sendImageByUrl(peerId, url, name)
     const msg = chatStore.messages.find(m => m.clientMsgID === tempMsgID)
     if (msg) msg.clientMsgID = realId
   } catch (err) {

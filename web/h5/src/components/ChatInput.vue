@@ -31,6 +31,11 @@
       </div>
     </template>
 
+    <!-- Emoji button -->
+    <button class="emoji-btn" :class="{ active: showEmoji }" @click="toggleEmoji">
+      😀
+    </button>
+
     <!-- Emoji / attachment toggle -->
     <button class="attach-btn" @click="toggleAttach">➕</button>
 
@@ -68,6 +73,14 @@
         </button>
       </div>
     </transition>
+
+    <!-- Emoji panel -->
+    <EmojiPanel
+      :visible="showEmoji"
+      :user-id="userId"
+      @close="showEmoji = false"
+      @pick="onEmojiPick"
+    />
   </div>
 
   <!-- Recording overlay indicator -->
@@ -83,20 +96,23 @@
 <script setup lang="ts">
 import { ref, onUnmounted } from 'vue'
 import { AudioRecorder } from '@/utils/recorder'
+import EmojiPanel from './EmojiPanel.vue'
 
-const props = withDefaults(defineProps<{ showCall?: boolean }>(), { showCall: false })
+const props = withDefaults(defineProps<{ showCall?: boolean; userId?: string }>(), { showCall: false, userId: '' })
 
 const emit = defineEmits<{
   (e: 'send-text', text: string): void
   (e: 'send-image', file: File): void
   (e: 'send-file', file: File): void
   (e: 'send-voice', payload: { blob: Blob; duration: number }): void
+  (e: 'send-emoji', payload: { url: string; name: string }): void
   (e: 'start-call'): void
 }>()
 
 const text = ref('')
 const voiceMode = ref(false)
 const showAttach = ref(false)
+const showEmoji = ref(false)
 const isRecording = ref(false)
 const recordSeconds = ref(0)
 
@@ -107,10 +123,21 @@ let recordTimer: ReturnType<typeof setInterval> | null = null
 function toggleVoiceMode() {
   voiceMode.value = !voiceMode.value
   showAttach.value = false
+  showEmoji.value = false
 }
 
 function toggleAttach() {
   showAttach.value = !showAttach.value
+  if (showAttach.value) showEmoji.value = false
+}
+
+function toggleEmoji() {
+  showEmoji.value = !showEmoji.value
+  if (showEmoji.value) showAttach.value = false
+}
+
+function onEmojiPick(payload: { url: string; name: string }) {
+  emit('send-emoji', payload)
 }
 
 function autoResize() {

@@ -618,6 +618,7 @@ Rectangle {
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
+                            HttpClient.touchEmoji(modelData)  // 记录使用 → 下次置顶
                             chatInput.sendImage(modelData)
                             emojiPopup.close()
                         }

@@ -21,6 +21,7 @@
 #include <QWindow>
 #include <QStandardPaths>
 #include <QCoreApplication>
+#include <algorithm>
 
 HttpClient::HttpClient(QObject *parent)
     : QObject(parent)
@@ -435,10 +436,40 @@ QStringList HttpClient::listEmojis() const
         return result;
     QDir d(dirPath);
     const QStringList filters = {"*.gif", "*.png", "*.jpg", "*.jpeg", "*.bmp", "*.webp"};
-    const QFileInfoList files = d.entryInfoList(filters, QDir::Files, QDir::Name);
+    QFileInfoList files = d.entryInfoList(filters, QDir::Files, QDir::Name);
+
+    // 读取每个表情的最近使用时间戳（QSettings: emoji_mru/<文件名> = 毫秒时间戳）
+    QSettings settings;
+    settings.beginGroup("emoji_mru");
+    QHash<QString, qint64> mru;
+    const QStringList keys = settings.childKeys();
+    for (const QString &k : keys)
+        mru.insert(k, settings.value(k).toLongLong());
+    settings.endGroup();
+
+    // 按 MRU 倒序排序；未使用过的 (ts==0) 保持原有名称顺序排在后面
+    std::stable_sort(files.begin(), files.end(),
+        [&mru](const QFileInfo &a, const QFileInfo &b) {
+            qint64 ta = mru.value(a.fileName(), 0);
+            qint64 tb = mru.value(b.fileName(), 0);
+            if (ta != tb) return ta > tb;
+            return false;  // 保持 entryInfoList 返回的名称升序
+        });
+
     for (const QFileInfo &fi : files)
         result << QDir::cleanPath(fi.absoluteFilePath());
     return result;
+}
+
+void HttpClient::touchEmoji(const QString &filePath)
+{
+    if (filePath.isEmpty()) return;
+    const QString fileName = QFileInfo(filePath).fileName();
+    if (fileName.isEmpty()) return;
+    QSettings settings;
+    settings.beginGroup("emoji_mru");
+    settings.setValue(fileName, QDateTime::currentMSecsSinceEpoch());
+    settings.endGroup();
 }
 
 // ── 剪贴板操作 ─────────────────────────────────────────

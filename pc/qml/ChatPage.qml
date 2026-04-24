@@ -307,7 +307,7 @@ Page {
                 // 面板标题栏 —— 显示外部彩票数据 + Tab 操作按钮
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 64
+                    Layout.preferredHeight: 78
                     color: "#e7e7e7"
 
                     RowLayout {
@@ -325,7 +325,7 @@ Page {
                             // 第一行：期号 + 球号图片
                             RowLayout {
                                 Layout.fillWidth: true
-                                spacing: 4
+                                spacing: 6
 
                                 Label {
                                     text: LotteryClient.hasData
@@ -337,20 +337,24 @@ Page {
                                     font.bold: true
                                 }
 
-                                // 球号图片串：每个数字字符对应一张 N号球.png
-                                Repeater {
-                                    model: LotteryClient.hasData ? LotteryClient.balls.length : 0
-                                    delegate: Image {
-                                        required property int index
-                                        readonly property string ch: LotteryClient.balls.charAt(index)
-                                        source: /^[0-9]$/.test(ch)
-                                                ? ("qrc:/ImAgentHub/resources/" + ch + "号球.png")
-                                                : ""
-                                        Layout.preferredWidth: 18
-                                        Layout.preferredHeight: 18
-                                        fillMode: Image.PreserveAspectFit
-                                        smooth: true
-                                        sourceSize: Qt.size(36, 36)
+                                // 球号图片串：紧贴排列，整体靠左
+                                Row {
+                                    spacing: 1
+                                    Layout.alignment: Qt.AlignVCenter
+                                    Repeater {
+                                        model: LotteryClient.hasData ? LotteryClient.balls.length : 0
+                                        delegate: Image {
+                                            required property int index
+                                            readonly property string ch: LotteryClient.balls.charAt(index)
+                                            source: /^[0-9]$/.test(ch)
+                                                    ? ("qrc:/ImAgentHub/resources/" + ch + "号球.png")
+                                                    : ""
+                                            width: 28
+                                            height: 28
+                                            fillMode: Image.PreserveAspectFit
+                                            smooth: true
+                                            sourceSize: Qt.size(56, 56)
+                                        }
                                     }
                                 }
 

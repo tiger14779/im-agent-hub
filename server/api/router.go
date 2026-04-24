@@ -60,6 +60,10 @@ func SetupRouter(
 	r.POST("/api/upload", UploadFile())
 	r.GET("/api/files/*path", ServeUploadedFiles())
 
+	// 表情资源（公共目录 data/Emoji/，所有客户端共用）
+	r.GET("/api/emojis", ListEmojis())
+	r.GET("/api/emojis/:name", ServeEmoji())
+
 	// Lottery data proxy (avoid CORS)
 	r.GET("/api/lottery/latest", LotteryLatest())
 

@@ -116,7 +116,10 @@ public:
     // 返回 Emoji 表情目录的绝对路径（多个候选路径中第一个存在的）
     Q_INVOKABLE QString emojiDir() const;
     // 列出 Emoji 表情目录中的所有图片文件（绝对路径），支持 gif/png/jpg/jpeg/bmp/webp
+    // 返回顺序：按最近使用时间倒序（MRU），未使用过的按文件名升序排在后面
     Q_INVOKABLE QStringList listEmojis() const;
+    // 记录一次表情使用（点击发送时调用），使其下次出现在列表最前面
+    Q_INVOKABLE void touchEmoji(const QString &filePath);
 
     // === 通用设置存取 ===
     Q_INVOKABLE void setSetting(const QString &key, const QString &value);
