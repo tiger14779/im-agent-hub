@@ -1,13 +1,23 @@
 <template>
   <div class="image-message" @click="previewVisible = true">
+    <video
+      v-if="isWebm"
+      :src="thumbUrl"
+      autoplay
+      loop
+      muted
+      playsinline
+      class="msg-image"
+    />
     <img
+      v-else
       :src="thumbUrl"
       alt="图片"
       class="msg-image"
       @load="loading = false"
       @error="onImgError"
     />
-    <div v-if="loading" class="img-loading">加载中…</div>
+    <div v-if="loading && !isWebm" class="img-loading">加载中…</div>
   </div>
 
   <ImagePreview
@@ -42,6 +52,8 @@ const fullUrl = computed(
     props.content.sourcePicture?.url ||
     thumbUrl.value
 )
+
+const isWebm = computed(() => fullUrl.value.toLowerCase().endsWith('.webm'))
 
 function onImgError() {
   loading.value = false

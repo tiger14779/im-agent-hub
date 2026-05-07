@@ -21,6 +21,7 @@ var emojiAllowedExt = map[string]bool{
 	".jpeg": true,
 	".bmp":  true,
 	".webp": true,
+	".webm": true,
 }
 
 // ListEmojis 列出 data/Emoji 下所有图片，返回访问 URL 与文件名

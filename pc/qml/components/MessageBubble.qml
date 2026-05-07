@@ -232,23 +232,23 @@ Item {
                     id: imageComponent
                     Item {
                         id: imgRoot
-                        // 判定是否为 gif（忽略 URL 上的查询参数与大小写）
-                        readonly property bool isGif: {
+                        readonly property string _cleanUrl: {
                             var s = bubble._stableImageUrl.toLowerCase()
-                            var qIdx = s.indexOf("?")
-                            if (qIdx >= 0) s = s.substring(0, qIdx)
-                            return s.endsWith(".gif")
+                            var q = s.indexOf("?")
+                            return q >= 0 ? s.substring(0, q) : s
                         }
+                        readonly property bool isGif: _cleanUrl.endsWith(".gif")
+                        readonly property bool isWebm: _cleanUrl.endsWith(".webm")
                         property Item activeImg: imgLoader.item
                         readonly property int srcW: activeImg ? activeImg.sourceSize.width : 0
                         readonly property int srcH: activeImg ? activeImg.sourceSize.height : 0
-                        width: Math.min(Math.max(srcW, 60), 220)
-                        height: srcW > 0 ? width / (srcW / srcH) : 120
+                        width: Math.min(Math.max(isWebm ? 200 : srcW, 60), 220)
+                        height: isWebm ? width * 0.75 : (srcW > 0 ? width / (srcW / srcH) : 120)
 
                         Loader {
                             id: imgLoader
                             anchors.fill: parent
-                            sourceComponent: imgRoot.isGif ? animComp : staticComp
+                            sourceComponent: imgRoot.isWebm ? webmComp : (imgRoot.isGif ? animComp : staticComp)
                         }
 
                         Component {
@@ -313,6 +313,21 @@ Item {
                                         text: "\u56FE\u7247\u52A0\u8F7D\u5931\u8D25"
                                         color: "#999"; font.pixelSize: 11
                                     }
+                                }
+                            }
+                        }
+
+                        Component {
+                            id: webmComp
+                            Video {
+                                source: bubble._stableImageUrl
+                                fillMode: VideoOutput.PreserveAspectFit
+                                loops: MediaPlayer.Infinite
+                                muted: true
+                                autoPlay: true
+                                Component.onCompleted: {
+                                    bubble._imageHasRendered = true
+                                    bubble.imageLoaded()
                                 }
                             }
                         }

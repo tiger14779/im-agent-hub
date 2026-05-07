@@ -9,7 +9,18 @@
         @touchend="onTouchEnd"
       >
         <button class="preview-close" @click.stop="emit('close')">✕</button>
+        <video
+          v-if="src.toLowerCase().endsWith('.webm')"
+          :src="src"
+          autoplay
+          loop
+          muted
+          playsinline
+          class="preview-img"
+          @click.stop
+        />
         <img
+          v-else
           :src="src"
           alt="预览"
           class="preview-img"

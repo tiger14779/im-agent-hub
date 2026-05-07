@@ -361,7 +361,7 @@ Page {
                                 Item { Layout.fillWidth: true }
                             }
 
-                            // 第二行：未结算 + 倒计时
+                            // 第二行：未结算 + 倒计时 + 添加按钮
                             RowLayout {
                                 Layout.fillWidth: true
                                 spacing: 12
@@ -391,37 +391,41 @@ Page {
                                 }
 
                                 Item { Layout.fillWidth: true }
-                            }
-                        }
 
-                        // 添加联系人按钮（仅在通讯录Tab显示）
-                        RoundButton {
-                            visible: currentTab === 1
-                            width: 28; height: 28; radius: 14
-                            flat: true
-                            Layout.alignment: Qt.AlignVCenter
-                            contentItem: Label {
-                                text: "+"
-                                font.pixelSize: 18; color: "#555"
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
-                            }
-                            onClicked: addContactDialog.open()
-                        }
+                                // 添加联系人按钮（仅在通讯录Tab显示）
+                                RoundButton {
+                                    visible: currentTab === 1
+                                    Layout.preferredWidth: 24
+                                    Layout.preferredHeight: 24
+                                    Layout.alignment: Qt.AlignVCenter
+                                    padding: 0
+                                    flat: true
+                                    contentItem: Label {
+                                        text: "+"
+                                        font.pixelSize: 16; color: "#555"
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    onClicked: addContactDialog.open()
+                                }
 
-                        // 创建群组按钮（仅在群组Tab显示）
-                        RoundButton {
-                            visible: currentTab === 2
-                            width: 28; height: 28; radius: 14
-                            flat: true
-                            Layout.alignment: Qt.AlignVCenter
-                            contentItem: Label {
-                                text: "+"
-                                font.pixelSize: 18; color: "#555"
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
+                                // 创建群组按钮（仅在群组Tab显示）
+                                RoundButton {
+                                    visible: currentTab === 2
+                                    Layout.preferredWidth: 24
+                                    Layout.preferredHeight: 24
+                                    Layout.alignment: Qt.AlignVCenter
+                                    padding: 0
+                                    flat: true
+                                    contentItem: Label {
+                                        text: "+"
+                                        font.pixelSize: 16; color: "#555"
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    onClicked: createGroupDialog.open()
+                                }
                             }
-                            onClicked: createGroupDialog.open()
                         }
                     }
 
@@ -1887,7 +1891,8 @@ Page {
             var lower = origName.toLowerCase()
             if (lower.endsWith(".png") || lower.endsWith(".jpg") ||
                 lower.endsWith(".jpeg") || lower.endsWith(".gif") ||
-                lower.endsWith(".webp") || lower.endsWith(".bmp")) {
+                lower.endsWith(".webp") || lower.endsWith(".bmp") ||
+                lower.endsWith(".webm")) {
                 // 图片消息
                 var imgContent = JSON.stringify({
                     "sourcePicture": {"url": url, "width": 0, "height": 0, "size": 0, "type": "image/png"},

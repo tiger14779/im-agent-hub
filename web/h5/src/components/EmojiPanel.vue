@@ -17,7 +17,17 @@
             class="emoji-item"
             @click="onPick(e)"
           >
+            <video
+              v-if="e.url.endsWith('.webm')"
+              :src="e.url"
+              autoplay
+              loop
+              muted
+              playsinline
+              class="emoji-img"
+            />
             <img
+              v-else
               :src="e.url"
               :alt="e.name"
               loading="lazy"

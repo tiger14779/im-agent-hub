@@ -435,7 +435,7 @@ QStringList HttpClient::listEmojis() const
     if (dirPath.isEmpty())
         return result;
     QDir d(dirPath);
-    const QStringList filters = {"*.gif", "*.png", "*.jpg", "*.jpeg", "*.bmp", "*.webp"};
+    const QStringList filters = {"*.gif", "*.png", "*.jpg", "*.jpeg", "*.bmp", "*.webp", "*.webm"};
     QFileInfoList files = d.entryInfoList(filters, QDir::Files, QDir::Name);
 
     // 读取每个表情的最近使用时间戳（QSettings: emoji_mru/<文件名> = 毫秒时间戳）
@@ -586,7 +586,7 @@ void HttpClient::copyLinkAsFile(const QString &link)
     QString txtDir = m_tempDir.filePath("txt");
     QDir().mkpath(txtDir);
 
-    QString filePath = txtDir + "/\u94FE\u63A5.txt";
+    QString filePath = txtDir + "/文件.txt";
     QFile file(filePath);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
         qWarning() << "[Clipboard] cannot write link file:" << filePath;

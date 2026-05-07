@@ -120,7 +120,8 @@ Rectangle {
         var lower = path.toLowerCase()
         return lower.endsWith(".png") || lower.endsWith(".jpg") ||
                lower.endsWith(".jpeg") || lower.endsWith(".gif") ||
-               lower.endsWith(".bmp") || lower.endsWith(".webp")
+               lower.endsWith(".bmp") || lower.endsWith(".webp") ||
+               lower.endsWith(".webm")
     }
 
     ColumnLayout {
@@ -582,34 +583,86 @@ Rectangle {
                 ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
                 delegate: Rectangle {
+                    id: emojiDelegate
                     width: emojiGrid.cellWidth - 4
                     height: emojiGrid.cellHeight - 4
                     color: emojiMouse.containsMouse ? "#eef7ee" : "transparent"
                     border.color: emojiMouse.containsMouse ? "#07c160" : "transparent"
                     radius: 4
 
-                    // 判断是否 gif：使用 AnimatedImage 动图预览，其它用普通 Image
                     property bool isGif: modelData.toLowerCase().endsWith(".gif")
+                    property bool isWebm: modelData.toLowerCase().endsWith(".webm")
+                    readonly property bool inView: y + height > emojiGrid.contentY &&
+                                                   y < emojiGrid.contentY + emojiGrid.height
 
-                    AnimatedImage {
-                        anchors.fill: parent
-                        anchors.margins: 4
-                        source: parent.isGif ? "file:///" + modelData : ""
-                        visible: parent.isGif
-                        fillMode: Image.PreserveAspectFit
-                        playing: true
-                        cache: true
-                        asynchronous: true
+                    // 进入视口后延迟激活，避免滚动时同时创建大量 Video 实例
+                    property bool mediaActive: false
+                    onInViewChanged: {
+                        if (inView) activateTimer.restart()
+                        else { activateTimer.stop(); mediaActive = false }
+                    }
+                    Timer {
+                        id: activateTimer
+                        interval: 120
+                        onTriggered: emojiDelegate.mediaActive = true
                     }
 
-                    Image {
+                    // 占位背景
+                    Rectangle {
                         anchors.fill: parent
                         anchors.margins: 4
-                        source: parent.isGif ? "" : "file:///" + modelData
-                        visible: !parent.isGif
-                        fillMode: Image.PreserveAspectFit
-                        cache: true
+                        color: "#f0f0f0"
+                        radius: 3
+                        visible: !mediaLoader.item || (mediaLoader.status === Loader.Loading)
+
+                        BusyIndicator {
+                            anchors.centerIn: parent
+                            width: 20; height: 20
+                            running: parent.visible && emojiDelegate.inView
+                        }
+                    }
+
+                    Loader {
+                        id: mediaLoader
+                        anchors.fill: parent
+                        anchors.margins: 4
+                        active: emojiDelegate.mediaActive
                         asynchronous: true
+                        sourceComponent: {
+                            if (emojiDelegate.isWebm) return webmComp
+                            if (emojiDelegate.isGif) return gifComp
+                            return imgComp
+                        }
+
+                        Component {
+                            id: webmComp
+                            Video {
+                                source: "file:///" + modelData
+                                fillMode: VideoOutput.PreserveAspectFit
+                                loops: MediaPlayer.Infinite
+                                muted: true
+                                autoPlay: true
+                            }
+                        }
+                        Component {
+                            id: gifComp
+                            AnimatedImage {
+                                source: "file:///" + modelData
+                                fillMode: Image.PreserveAspectFit
+                                playing: true
+                                cache: true
+                                asynchronous: true
+                            }
+                        }
+                        Component {
+                            id: imgComp
+                            Image {
+                                source: "file:///" + modelData
+                                fillMode: Image.PreserveAspectFit
+                                cache: true
+                                asynchronous: true
+                            }
+                        }
                     }
 
                     MouseArea {
@@ -618,7 +671,7 @@ Rectangle {
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
-                            HttpClient.touchEmoji(modelData)  // 记录使用 → 下次置顶
+                            HttpClient.touchEmoji(modelData)
                             chatInput.sendImage(modelData)
                             emojiPopup.close()
                         }
