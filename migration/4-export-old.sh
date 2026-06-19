@@ -13,10 +13,12 @@
 #    - 默认不停业务！dump 期间业务继续跑
 #    - dump 是一致性快照 (PG MVCC)，dump 期间的新数据不会进 dump
 #    - dump 完后业务继续写入的数据需要在停机切换时单独处理
+#    - uploads 默认只导最近 30 天 (聊天图片/文件), 老的留在旧服务器
 #
 #  用法:
-#    bash 4-export-old.sh                   # 自动检测
-#    bash 4-export-old.sh --site-id 03 --domain site03.com
+#    bash 4-export-old.sh --site-id 03 --domain site03.com               # uploads 默认 30 天
+#    bash 4-export-old.sh --site-id 03 --domain site03.com --uploads-days 0   # 导全部 uploads
+#    bash 4-export-old.sh --site-id 03 --domain site03.com --uploads-days 90  # 改 90 天
 # ============================================================
 set -euo pipefail
 
@@ -28,7 +30,9 @@ OUT_DIR="/tmp/im-hub-export"
 
 SITE_ID=""
 DOMAIN=""
-SKIP_UPLOADS_AGE=0   # 默认全部 uploads, 设为 30 则只导出最近 30 天的
+# 默认只导出最近 30 天的 uploads (聊天图片/文件, 老的留在旧服务器, 业务无影响)
+# 想导全部用: --uploads-days 0  (0 = 无过滤, 全量)
+SKIP_UPLOADS_AGE=30
 
 while [[ $# -gt 0 ]]; do
     case $1 in
