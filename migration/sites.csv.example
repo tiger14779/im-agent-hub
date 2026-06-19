@@ -1,0 +1,14 @@
+site_id,domain,old_server_ip
+01,site01.com,1.2.3.4
+02,site02.com,1.2.3.5
+03,site03.com,1.2.3.6
+04,site04.com,1.2.3.7
+05,site05.com,1.2.3.8
+06,site06.com,1.2.3.9
+07,site07.com,1.2.3.10
+08,site08.com,1.2.3.11
+09,site09.com,1.2.3.12
+10,site10.com,1.2.3.13
+11,site11.com,1.2.3.14
+12,site12.com,1.2.3.15
+13,site13.com,1.2.3.16
