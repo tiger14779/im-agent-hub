@@ -77,6 +77,9 @@ M_DUMP_BYTES=$(get_y dump_size_bytes)
 M_UPLOADS_TAR=$(get_y uploads_tar)
 M_UPLOADS_SHA=$(get_y uploads_tar_sha256)
 M_UPLOADS_COUNT=$(get_y uploads_file_count)
+M_EMOJI_TAR=$(get_y emoji_tar)
+M_EMOJI_SHA=$(get_y emoji_tar_sha256)
+M_EMOJI_COUNT=$(get_y emoji_file_count)
 
 info "==========================================="
 info "  还原 site ${SITE_ID}"
@@ -132,6 +135,24 @@ if [ -n "$M_UPLOADS_TAR" ] && [ "$M_UPLOADS_TAR" != "" ]; then
     fi
 else
     UPLOADS_TAR_PATH=""
+fi
+
+# Emoji
+if [ -n "$M_EMOJI_TAR" ] && [ "$M_EMOJI_TAR" != "" ]; then
+    EMOJI_TAR_PATH="${SITE_IMPORT}/${M_EMOJI_TAR}"
+    if [ -f "$EMOJI_TAR_PATH" ]; then
+        info "校验 emoji sha256..."
+        ACTUAL_ESHA=$(sha256sum "$EMOJI_TAR_PATH" | awk '{print $1}')
+        if [ "$ACTUAL_ESHA" != "$M_EMOJI_SHA" ]; then
+            error "❌ emoji sha256 不匹配"
+        fi
+        info "✅ emoji sha256 通过"
+    else
+        warn "manifest 声明有 emoji 但找不到文件 $EMOJI_TAR_PATH"
+        EMOJI_TAR_PATH=""
+    fi
+else
+    EMOJI_TAR_PATH=""
 fi
 
 # ---------- 4. dump 完整性自检 ----------
@@ -200,12 +221,20 @@ END\$\$;
 # ---------- 9. 解压 uploads ----------
 if [ -n "$UPLOADS_TAR_PATH" ]; then
     info "解压 uploads → ${SITE_DIR}/data/uploads/ ..."
-    mkdir -p "${SITE_DIR}/data/uploads"
     # 清空再解 (确保不混旧数据)
     rm -rf "${SITE_DIR}/data/uploads"
     mkdir -p "${SITE_DIR}/data/uploads"
     tar xzf "$UPLOADS_TAR_PATH" -C "${SITE_DIR}/data/uploads/"
     info "uploads 解压完成"
+fi
+
+# ---------- 9b. 解压 Emoji (公共表情资源, 用户自定义表情) ----------
+if [ -n "$EMOJI_TAR_PATH" ]; then
+    info "解压 Emoji → ${SITE_DIR}/data/Emoji/ ..."
+    rm -rf "${SITE_DIR}/data/Emoji"
+    mkdir -p "${SITE_DIR}/data/Emoji"
+    tar xzf "$EMOJI_TAR_PATH" -C "${SITE_DIR}/data/Emoji/"
+    info "Emoji 解压完成"
 fi
 
 # ---------- 10. 启动服务 ----------
@@ -241,6 +270,12 @@ if [ -n "$UPLOADS_TAR_PATH" ]; then
     if [ "$ACTUAL_FILES" != "$M_UPLOADS_COUNT" ]; then
         warn "⚠️  文件数不一致 (可能是导出时的过滤导致，检查 manifest.uploads_age_filter_days)"
     fi
+fi
+
+if [ -n "$EMOJI_TAR_PATH" ]; then
+    ACTUAL_EMOJI=$(find "${SITE_DIR}/data/Emoji" -type f 2>/dev/null | wc -l)
+    info "emoji 文件数: 期望 $M_EMOJI_COUNT, 实际 $ACTUAL_EMOJI"
+    [ "$ACTUAL_EMOJI" = "$M_EMOJI_COUNT" ] || warn "⚠️  emoji 文件数不一致"
 fi
 
 # ---------- 13. 验证: HTTP 健康检查 ----------

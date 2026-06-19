@@ -16,13 +16,14 @@ set -euo pipefail
 INSTALL_DIR="${INSTALL_DIR:-/opt/im-agent-hub}"
 CONFIG_FILE="${INSTALL_DIR}/server/config/config.yaml"
 UPLOADS_DIR="${INSTALL_DIR}/server/data/uploads"
+EMOJI_DIR="${INSTALL_DIR}/server/data/Emoji"
 OUT_DIR="/tmp/im-hub-audit"
 
 SITE_ID=""
 while [[ $# -gt 0 ]]; do
     case $1 in
         --site-id) SITE_ID="$2"; shift 2 ;;
-        --install-dir) INSTALL_DIR="$2"; CONFIG_FILE="${INSTALL_DIR}/server/config/config.yaml"; UPLOADS_DIR="${INSTALL_DIR}/server/data/uploads"; shift 2 ;;
+        --install-dir) INSTALL_DIR="$2"; CONFIG_FILE="${INSTALL_DIR}/server/config/config.yaml"; UPLOADS_DIR="${INSTALL_DIR}/server/data/uploads"; EMOJI_DIR="${INSTALL_DIR}/server/data/Emoji"; shift 2 ;;
         *) echo "unknown arg: $1"; exit 1 ;;
     esac
 done
@@ -30,6 +31,7 @@ done
 # ---------- 前置检查 ----------
 [ -f "$CONFIG_FILE" ] || { echo "❌ config not found: $CONFIG_FILE"; exit 1; }
 command -v psql >/dev/null || { echo "❌ psql not installed"; exit 1; }
+command -v sudo >/dev/null || { echo "❌ sudo not installed (apt install sudo)"; exit 1; }
 
 # ---------- 从 nginx 推断域名 (如果存在) ----------
 DETECTED_DOMAIN=""
@@ -57,46 +59,54 @@ if ! [[ "$SITE_ID" =~ ^[0-9]{2}$ ]]; then
 fi
 
 # ---------- 解析配置 ----------
-get_yaml() {
-    # 简单 yaml 取值: 取 key 后面的字符串值 (不支持嵌套，平铺即可)
-    local key="$1"
-    grep -E "^\s*${key}\s*:" "$CONFIG_FILE" | head -1 | sed -E "s/^\s*${key}\s*:\s*//;s/^\"//;s/\"$//;s/\s*#.*$//"
+# 用 awk 按 section (顶级 key) 分块取值，避免 head -1 拿到错误段的同名 key
+# 例: section=database, key=port → 取 database.port (而不是 server.port)
+get_yaml_section() {
+    local section="$1" key="$2"
+    awk -v sec="$section" -v key="$key" '
+        # 顶级 key (无前导空格且以冒号结尾) 切换 section
+        /^[A-Za-z_]+:\s*$/ { cur=$0; sub(/:.*/, "", cur); next }
+        # 在目标 section 内匹配 key
+        cur==sec && $0 ~ "^[[:space:]]+" key "[[:space:]]*:" {
+            sub("^[[:space:]]+" key "[[:space:]]*:[[:space:]]*", "")
+            sub(/^"/, ""); sub(/"$/, ""); sub(/[[:space:]]*#.*$/, "")
+            print; exit
+        }
+    ' "$CONFIG_FILE"
 }
 
-DB_HOST=$(get_yaml host)
-DB_PORT=$(get_yaml port | head -1)
-DB_USER=$(get_yaml user)
-DB_PASS=$(get_yaml password | head -1)
-DB_NAME=$(get_yaml dbname)
-JWT_SECRET=$(get_yaml jwt_secret)
-VOICE_SECRET=$(get_yaml secret | tail -1)   # voice_relay.secret 在文件末尾
-VOICE_URL=$(get_yaml relay_ws_url)
+DB_NAME=$(get_yaml_section database dbname)
+JWT_SECRET=$(get_yaml_section server jwt_secret)
+VOICE_SECRET=$(get_yaml_section voice_relay secret)
+VOICE_URL=$(get_yaml_section voice_relay relay_ws_url)
 
-# 兼容 host: postgres (旧 docker 配置) → 改为 localhost 做 audit
-if [ "$DB_HOST" = "postgres" ]; then
-    DB_HOST="localhost"
-fi
-DB_PORT="${DB_PORT:-5432}"
-
-[ -n "$DB_NAME" ] || { echo "❌ 无法从 config 解析 dbname"; exit 1; }
+[ -n "$DB_NAME" ] || { echo "❌ 无法从 config 解析 database.dbname"; exit 1; }
+[ -n "$JWT_SECRET" ] || { echo "❌ 无法从 config 解析 server.jwt_secret"; exit 1; }
 [ -n "$VOICE_SECRET" ] || echo "⚠️  voice_relay.secret 为空，语音通话可能未启用"
 
-# ---------- 查询 PG ----------
-export PGPASSWORD="$DB_PASS"
-PSQL="psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME -tA"
+# ---------- 查询 PG (走 peer 认证, 不依赖 yaml 里的 host/port/user/password) ----------
+# 优势: 不受 docker 时代的 host:postgres / 端口混淆等历史遗留影响
+PSQL_AS_POSTGRES="sudo -u postgres psql -d $DB_NAME -tA"
 
-DB_SIZE_BYTES=$($PSQL -c "SELECT pg_database_size('$DB_NAME');" 2>/dev/null || echo "0")
-DB_SIZE_HUMAN=$($PSQL -c "SELECT pg_size_pretty(pg_database_size('$DB_NAME'));" 2>/dev/null || echo "?")
+# 先检查能不能连
+if ! $PSQL_AS_POSTGRES -c "SELECT 1" >/dev/null 2>&1; then
+    echo "❌ 无法以 postgres 用户连接 database '$DB_NAME'"
+    echo "   请检查: sudo -u postgres psql -l  是否能看到 $DB_NAME"
+    exit 1
+fi
+
+DB_SIZE_BYTES=$($PSQL_AS_POSTGRES -c "SELECT pg_database_size('$DB_NAME');" 2>/dev/null || echo "0")
+DB_SIZE_HUMAN=$($PSQL_AS_POSTGRES -c "SELECT pg_size_pretty(pg_database_size('$DB_NAME'));" 2>/dev/null || echo "?")
 
 # 表行数
-TABLE_ROWS=$($PSQL -c "
+TABLE_ROWS=$($PSQL_AS_POSTGRES -c "
 SELECT relname || '=' || n_live_tup
 FROM pg_stat_user_tables
 ORDER BY relname;" 2>/dev/null | tr '\n' ',' | sed 's/,$//')
 
 # message 表的最早/最新时间 (用于评估数据时间范围)
-MSG_OLDEST=$($PSQL -c "SELECT to_timestamp(MIN(send_time)/1000) FROM messages;" 2>/dev/null | head -1 || echo "?")
-MSG_NEWEST=$($PSQL -c "SELECT to_timestamp(MAX(send_time)/1000) FROM messages;" 2>/dev/null | head -1 || echo "?")
+MSG_OLDEST=$($PSQL_AS_POSTGRES -c "SELECT to_timestamp(MIN(send_time)/1000) FROM messages;" 2>/dev/null | head -1 || echo "?")
+MSG_NEWEST=$($PSQL_AS_POSTGRES -c "SELECT to_timestamp(MAX(send_time)/1000) FROM messages;" 2>/dev/null | head -1 || echo "?")
 
 # ---------- uploads ----------
 UPLOADS_BYTES=0
@@ -106,6 +116,16 @@ if [ -d "$UPLOADS_DIR" ]; then
     UPLOADS_BYTES=$(du -sb "$UPLOADS_DIR" 2>/dev/null | awk '{print $1}')
     UPLOADS_HUMAN=$(du -sh "$UPLOADS_DIR" 2>/dev/null | awk '{print $1}')
     UPLOADS_COUNT=$(find "$UPLOADS_DIR" -type f 2>/dev/null | wc -l)
+fi
+
+# ---------- emoji (公共表情资源, 用户上传的自定义表情存这里) ----------
+EMOJI_BYTES=0
+EMOJI_HUMAN="0"
+EMOJI_COUNT=0
+if [ -d "$EMOJI_DIR" ]; then
+    EMOJI_BYTES=$(du -sb "$EMOJI_DIR" 2>/dev/null | awk '{print $1}')
+    EMOJI_HUMAN=$(du -sh "$EMOJI_DIR" 2>/dev/null | awk '{print $1}')
+    EMOJI_COUNT=$(find "$EMOJI_DIR" -type f 2>/dev/null | wc -l)
 fi
 
 # ---------- secret 指纹 (只暴露 sha256，原文存在 .secrets 里) ----------
@@ -147,6 +167,12 @@ uploads_total_bytes: ${UPLOADS_BYTES}
 uploads_total_human: ${UPLOADS_HUMAN}
 uploads_file_count: ${UPLOADS_COUNT}
 
+# Emoji (公共表情资源, 用户自定义表情)
+emoji_path: ${EMOJI_DIR}
+emoji_total_bytes: ${EMOJI_BYTES}
+emoji_total_human: ${EMOJI_HUMAN}
+emoji_file_count: ${EMOJI_COUNT}
+
 # Secret fingerprints (sha256 first 16 chars)
 # ★ 13 台旧服务器的 voice_relay_secret_sha256 必须完全相同！
 voice_relay_secret_sha256: ${VOICE_SECRET_SHA}
@@ -173,6 +199,7 @@ echo "  域名:           $SOURCE_DOMAIN"
 echo "  数据库:         $DB_NAME ($DB_SIZE_HUMAN)"
 echo "  消息时间范围:   $MSG_OLDEST  →  $MSG_NEWEST"
 echo "  uploads:        $UPLOADS_HUMAN ($UPLOADS_COUNT 个文件)"
+echo "  emoji:          $EMOJI_HUMAN ($EMOJI_COUNT 个表情)"
 echo "  voice secret 指纹: $VOICE_SECRET_SHA"
 echo ""
 echo "  输出文件:"

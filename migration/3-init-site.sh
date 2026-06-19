@@ -81,32 +81,44 @@ if [ "${source_domain:-}" != "$DOMAIN" ]; then
     [ "$CONFIRM" = "yes" ] || error "已取消"
 fi
 
-# ---------- 3. 创建 PG database ----------
-info "创建 PG database $DB_NAME ..."
-DB_PASS=$(openssl rand -hex 24)
+# ---------- 3. 创建 PG database (密码持久化, 避免重跑改密导致连接断) ----------
+# 密码文件: /opt/im-hub/secrets/db_pass_NN
+DB_PASS_FILE="${SECRETS_DIR}/db_pass_${SITE_ID}"
 
-sudo -u postgres psql <<EOF
-DO \$\$
-BEGIN
-   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}') THEN
-      CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASS}';
-   ELSE
-      ALTER USER ${DB_USER} WITH PASSWORD '${DB_PASS}';
-   END IF;
-END
-\$\$;
-EOF
+USER_EXISTS=$(sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}';" 2>/dev/null)
+
+if [ -z "$USER_EXISTS" ]; then
+    # 首次创建: 生成新密码并保存
+    info "创建 PG 用户 $DB_USER ..."
+    DB_PASS=$(openssl rand -hex 24)
+    sudo -u postgres psql -c "CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASS}';" >/dev/null
+    echo "$DB_PASS" > "$DB_PASS_FILE"
+    chmod 600 "$DB_PASS_FILE"
+elif [ -f "$DB_PASS_FILE" ]; then
+    # 用户存在且我们记得密码: 重用 (不改, 否则运行中的进程会断)
+    info "PG 用户 $DB_USER 已存在, 复用既有密码"
+    DB_PASS=$(cat "$DB_PASS_FILE")
+else
+    # 用户存在但密码丢失: 必须重置 (会导致正在运行的进程断连, 但只是 systemd 自动重启)
+    warn "PG 用户 $DB_USER 存在但密码文件丢失, 重置密码 (运行中的实例会断连后自动重连)"
+    DB_PASS=$(openssl rand -hex 24)
+    sudo -u postgres psql -c "ALTER USER ${DB_USER} WITH PASSWORD '${DB_PASS}';" >/dev/null
+    echo "$DB_PASS" > "$DB_PASS_FILE"
+    chmod 600 "$DB_PASS_FILE"
+fi
 
 # 检查库是否已存在
 if sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}';" | grep -q 1; then
-    warn "database ${DB_NAME} 已存在，跳过创建"
+    warn "database ${DB_NAME} 已存在, 跳过创建"
 else
+    info "创建 PG database $DB_NAME ..."
     sudo -u postgres createdb -O "$DB_USER" "$DB_NAME"
 fi
 
 # ---------- 4. 创建目录 ----------
 info "创建 site 目录 $SITE_DIR ..."
 mkdir -p "${SITE_DIR}/data/uploads"
+mkdir -p "${SITE_DIR}/data/Emoji"   # 表情资源, 5-restore-new.sh 会写入用户的自定义表情
 
 # ---------- 5. 软链共享静态资源 ----------
 # WorkingDirectory 是 site 目录，im-agent-hub 会从 ./static 读

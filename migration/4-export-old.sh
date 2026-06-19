@@ -23,6 +23,7 @@ set -euo pipefail
 INSTALL_DIR="${INSTALL_DIR:-/opt/im-agent-hub}"
 CONFIG_FILE="${INSTALL_DIR}/server/config/config.yaml"
 UPLOADS_DIR="${INSTALL_DIR}/server/data/uploads"
+EMOJI_DIR="${INSTALL_DIR}/server/data/Emoji"
 OUT_DIR="/tmp/im-hub-export"
 
 SITE_ID=""
@@ -34,7 +35,7 @@ while [[ $# -gt 0 ]]; do
         --site-id) SITE_ID="$2"; shift 2 ;;
         --domain) DOMAIN="$2"; shift 2 ;;
         --uploads-days) SKIP_UPLOADS_AGE="$2"; shift 2 ;;
-        --install-dir) INSTALL_DIR="$2"; CONFIG_FILE="${INSTALL_DIR}/server/config/config.yaml"; UPLOADS_DIR="${INSTALL_DIR}/server/data/uploads"; shift 2 ;;
+        --install-dir) INSTALL_DIR="$2"; CONFIG_FILE="${INSTALL_DIR}/server/config/config.yaml"; UPLOADS_DIR="${INSTALL_DIR}/server/data/uploads"; EMOJI_DIR="${INSTALL_DIR}/server/data/Emoji"; shift 2 ;;
         *) echo "unknown: $1"; exit 1 ;;
     esac
 done
@@ -67,19 +68,28 @@ fi
 
 [[ "$SITE_ID" =~ ^[0-9]{2}$ ]] || error "site_id 必须是两位数字"
 
-# ---------- 2. 读 DB 配置 ----------
+# ---------- 2. 读 DB 名 (用 awk 按 section 精确解析, 避免 head -1 拿错) ----------
 [ -f "$CONFIG_FILE" ] || error "找不到 $CONFIG_FILE"
+command -v sudo >/dev/null || error "sudo 未装"
 
-get_yaml() {
-    grep -E "^\s*$1\s*:" "$CONFIG_FILE" | head -1 | sed -E "s/^\s*$1\s*:\s*//;s/^\"//;s/\"$//;s/\s*#.*$//"
+get_yaml_section() {
+    local section="$1" key="$2"
+    awk -v sec="$section" -v key="$key" '
+        /^[A-Za-z_]+:\s*$/ { cur=$0; sub(/:.*/, "", cur); next }
+        cur==sec && $0 ~ "^[[:space:]]+" key "[[:space:]]*:" {
+            sub("^[[:space:]]+" key "[[:space:]]*:[[:space:]]*", "")
+            sub(/^"/, ""); sub(/"$/, ""); sub(/[[:space:]]*#.*$/, "")
+            print; exit
+        }
+    ' "$CONFIG_FILE"
 }
-DB_HOST=$(get_yaml host); [ "$DB_HOST" = "postgres" ] && DB_HOST="localhost"
-DB_PORT=$(get_yaml port | head -1); DB_PORT="${DB_PORT:-5432}"
-DB_USER=$(get_yaml user)
-DB_PASS=$(get_yaml password | head -1)
-DB_NAME=$(get_yaml dbname)
+DB_NAME=$(get_yaml_section database dbname)
+[ -n "$DB_NAME" ] || error "无法从 $CONFIG_FILE 解析 database.dbname"
 
-export PGPASSWORD="$DB_PASS"
+# ★ 改用 sudo -u postgres 走 peer 认证, 不依赖 yaml 里的 host/port/user/password
+# 这样兼容 docker 时代的 host:postgres 配置, 也不受端口同名混淆影响
+PG_DUMP_AS_POSTGRES="sudo -u postgres pg_dump"
+PSQL_AS_POSTGRES="sudo -u postgres psql -d $DB_NAME -tA"
 
 # ---------- 3. 准备输出目录 ----------
 TS=$(date +%Y%m%d-%H%M%S)
@@ -88,6 +98,7 @@ mkdir -p "$SITE_OUT"
 
 DUMP_FILE="${SITE_OUT}/${DOMAIN}__site${SITE_ID}__${TS}.dump"
 UPLOADS_TAR="${SITE_OUT}/${DOMAIN}__site${SITE_ID}__${TS}.uploads.tar.gz"
+EMOJI_TAR="${SITE_OUT}/${DOMAIN}__site${SITE_ID}__${TS}.emoji.tar.gz"
 MANIFEST="${SITE_OUT}/export_manifest.yaml"
 
 info "==========================================="
@@ -100,21 +111,22 @@ info ""
 # ---------- 4. dump 前记录行数 (供 restore 后比对) ----------
 info "记录 dump 前表行数..."
 PRE_ROWS_FILE="${SITE_OUT}/pre_dump_row_counts.txt"
-psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -tA <<'EOF' > "$PRE_ROWS_FILE"
+$PSQL_AS_POSTGRES -c "
 SELECT relname || '=' || n_live_tup
 FROM pg_stat_user_tables
 ORDER BY relname;
-EOF
+" > "$PRE_ROWS_FILE"
 cat "$PRE_ROWS_FILE" | sed 's/^/  /'
 
-# ---------- 5. pg_dump ----------
+# ---------- 5. pg_dump (走 peer 认证, sudo -u postgres, 输出到 stdout) ----------
 info "执行 pg_dump (custom format)..."
 START=$(date +%s)
-pg_dump -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" \
-    -Fc --no-owner --no-acl \
-    -f "$DUMP_FILE"
+# stdout 管到 root 进程, 文件由 root 创建, 避免 postgres 用户写权限问题
+$PG_DUMP_AS_POSTGRES -d "$DB_NAME" -Fc --no-owner --no-acl > "$DUMP_FILE"
 DUMP_ELAPSED=$(($(date +%s) - START))
 DUMP_SIZE=$(stat -c%s "$DUMP_FILE")
+# 完整性立刻自检 (空文件或 pg_dump 失败会 0 字节)
+[ "$DUMP_SIZE" -gt 100 ] || error "dump 文件异常 (${DUMP_SIZE} bytes), pg_dump 可能失败"
 info "dump 完成: $(du -h "$DUMP_FILE" | cut -f1) (耗时 ${DUMP_ELAPSED}s)"
 
 # ---------- 6. dump 自检 (能 list 出来说明文件没坏) ----------
@@ -153,6 +165,23 @@ else
     TAR_SIZE=0
 fi
 
+# ---------- 8b. tar Emoji (公共表情资源, 用户上传的自定义表情, 不能丢) ----------
+if [ -d "$EMOJI_DIR" ] && [ "$(ls -A "$EMOJI_DIR" 2>/dev/null)" ]; then
+    info "打包 Emoji/ ..."
+    tar czf "$EMOJI_TAR" -C "$EMOJI_DIR" .
+    EMOJI_TAR_SIZE=$(stat -c%s "$EMOJI_TAR")
+    EMOJI_FILE_COUNT=$(tar tzf "$EMOJI_TAR" 2>/dev/null | grep -v '/$' | wc -l)
+    sha256sum "$EMOJI_TAR" | awk '{print $1}' > "${EMOJI_TAR}.sha256"
+    EMOJI_SHA=$(cat "${EMOJI_TAR}.sha256")
+    info "Emoji 打包: $(du -h "$EMOJI_TAR" | cut -f1) ($EMOJI_FILE_COUNT 表情)"
+else
+    warn "Emoji 目录为空或不存在，跳过"
+    EMOJI_TAR=""
+    EMOJI_SHA=""
+    EMOJI_FILE_COUNT=0
+    EMOJI_TAR_SIZE=0
+fi
+
 # ---------- 9. 写 manifest ----------
 SOURCE_IP=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 HOSTNAME_VAL=$(hostname)
@@ -186,6 +215,12 @@ uploads_tar_size_bytes: ${TAR_SIZE}
 uploads_tar_sha256: ${UPLOADS_SHA}
 uploads_file_count: ${UPLOADS_FILE_COUNT}
 uploads_age_filter_days: ${SKIP_UPLOADS_AGE}
+
+# Emoji (公共表情资源, 全量打包)
+emoji_tar: $(basename "${EMOJI_TAR:-}")
+emoji_tar_size_bytes: ${EMOJI_TAR_SIZE}
+emoji_tar_sha256: ${EMOJI_SHA}
+emoji_file_count: ${EMOJI_FILE_COUNT}
 EOF
 
 # ---------- 10. 完成 ----------
