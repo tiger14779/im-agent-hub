@@ -59,10 +59,19 @@ if ! [[ "$SITE_ID" =~ ^[0-9]{2}$ ]]; then
 fi
 
 # ---------- 解析配置 ----------
-# 用 awk 按 section (顶级 key) 分块取值，避免 head -1 拿到错误段的同名 key
-# 例: section=database, key=port → 取 database.port (而不是 server.port)
-get_yaml_section() {
-    local section="$1" key="$2"
+# 代码逻辑 (server/config/config.go LoadConfig):
+#   1. 总是先读 config.yaml 作为 base
+#   2. 如果 config.local.yaml 存在, 在 base 上 merge override
+# 我们的脚本必须复制这个行为, 否则会拿到过时的 base 值
+LOCAL_CONFIG="${INSTALL_DIR}/server/config/config.local.yaml"
+USING_LOCAL=0
+[ -f "$LOCAL_CONFIG" ] && USING_LOCAL=1
+
+# 按 section 精确取值, 避免 head -1 拿到错误段的同名 key
+# 例: section=database, key=port → 取 database.port (不是 server.port)
+awk_yaml() {
+    local file="$1" section="$2" key="$3"
+    [ -f "$file" ] || return
     awk -v sec="$section" -v key="$key" '
         # 顶级 key (无前导空格且以冒号结尾) 切换 section
         /^[A-Za-z_]+:\s*$/ { cur=$0; sub(/:.*/, "", cur); next }
@@ -72,7 +81,18 @@ get_yaml_section() {
             sub(/^"/, ""); sub(/"$/, ""); sub(/[[:space:]]*#.*$/, "")
             print; exit
         }
-    ' "$CONFIG_FILE"
+    ' "$file"
+}
+
+# 模拟 LoadConfig 的 base + override 合并: local 非空则用 local, 否则用 base
+get_yaml_section() {
+    local section="$1" key="$2"
+    local val=""
+    if [ "$USING_LOCAL" -eq 1 ]; then
+        val=$(awk_yaml "$LOCAL_CONFIG" "$section" "$key")
+    fi
+    [ -z "$val" ] && val=$(awk_yaml "$CONFIG_FILE" "$section" "$key")
+    echo "$val"
 }
 
 DB_NAME=$(get_yaml_section database dbname)
@@ -137,6 +157,11 @@ JWT_SECRET_SHA=$(sha_short "$JWT_SECRET")
 HOSTNAME=$(hostname)
 SOURCE_IP=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 TIMESTAMP=$(date -Iseconds)
+if [ "$USING_LOCAL" -eq 1 ]; then
+    CONFIG_SOURCE_DESC="config.yaml + config.local.yaml (local override)"
+else
+    CONFIG_SOURCE_DESC="config.yaml only"
+fi
 
 # ---------- 写文件 ----------
 mkdir -p "$OUT_DIR"
@@ -152,6 +177,7 @@ source_domain: ${SOURCE_DOMAIN}
 source_ip: ${SOURCE_IP}
 source_hostname: ${HOSTNAME}
 audited_at: ${TIMESTAMP}
+config_source: ${CONFIG_SOURCE_DESC}
 
 # Database
 db_name: ${DB_NAME}

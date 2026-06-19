@@ -68,12 +68,17 @@ fi
 
 [[ "$SITE_ID" =~ ^[0-9]{2}$ ]] || error "site_id 必须是两位数字"
 
-# ---------- 2. 读 DB 名 (用 awk 按 section 精确解析, 避免 head -1 拿错) ----------
+# ---------- 2. 读 DB 名 (复现代码的 base + local override 合并逻辑) ----------
 [ -f "$CONFIG_FILE" ] || error "找不到 $CONFIG_FILE"
 command -v sudo >/dev/null || error "sudo 未装"
 
-get_yaml_section() {
-    local section="$1" key="$2"
+LOCAL_CONFIG="${INSTALL_DIR}/server/config/config.local.yaml"
+USING_LOCAL=0
+[ -f "$LOCAL_CONFIG" ] && USING_LOCAL=1
+
+awk_yaml() {
+    local file="$1" section="$2" key="$3"
+    [ -f "$file" ] || return
     awk -v sec="$section" -v key="$key" '
         /^[A-Za-z_]+:\s*$/ { cur=$0; sub(/:.*/, "", cur); next }
         cur==sec && $0 ~ "^[[:space:]]+" key "[[:space:]]*:" {
@@ -81,10 +86,17 @@ get_yaml_section() {
             sub(/^"/, ""); sub(/"$/, ""); sub(/[[:space:]]*#.*$/, "")
             print; exit
         }
-    ' "$CONFIG_FILE"
+    ' "$file"
+}
+get_yaml_section() {
+    local section="$1" key="$2" val=""
+    [ "$USING_LOCAL" -eq 1 ] && val=$(awk_yaml "$LOCAL_CONFIG" "$section" "$key")
+    [ -z "$val" ] && val=$(awk_yaml "$CONFIG_FILE" "$section" "$key")
+    echo "$val"
 }
 DB_NAME=$(get_yaml_section database dbname)
-[ -n "$DB_NAME" ] || error "无法从 $CONFIG_FILE 解析 database.dbname"
+[ -n "$DB_NAME" ] || error "无法从 config 解析 database.dbname"
+[ "$USING_LOCAL" -eq 1 ] && info "检测到 config.local.yaml, 使用合并后的配置"
 
 # ★ 改用 sudo -u postgres 走 peer 认证, 不依赖 yaml 里的 host/port/user/password
 # 这样兼容 docker 时代的 host:postgres 配置, 也不受端口同名混淆影响
