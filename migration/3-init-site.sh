@@ -49,7 +49,8 @@ error() { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
 [ -f "$SITES_CSV" ] || error "找不到 $SITES_CSV，请先上传"
 
 # ---------- 1. 从 csv 读出 domain ----------
-DOMAIN=$(awk -F',' -v sid="$SITE_ID" '$1==sid{print $2}' "$SITES_CSV")
+# exit 防 csv 误填多行同一 site_id 时拼成多行 domain
+DOMAIN=$(awk -F',' -v sid="$SITE_ID" '$1==sid{print $2; exit}' "$SITES_CSV")
 [ -n "$DOMAIN" ] || error "site_id=$SITE_ID 在 $SITES_CSV 里找不到"
 PORT=$((8080 + 10#$SITE_ID))
 DB_NAME="imhub_${SITE_ID}"
