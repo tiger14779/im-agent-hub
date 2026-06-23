@@ -67,14 +67,20 @@ info "==========================================="
 SECRETS_FILE="${SECRETS_DIR}/site_${SITE_ID}.secrets"
 [ -f "$SECRETS_FILE" ] || error "找不到 $SECRETS_FILE，请先上传 audit 阶段生成的 secrets 文件"
 
-# 用 . 加载文件 (KEY=VALUE 格式)
-set -a; source "$SECRETS_FILE"; set +a
+# 安全解析 KEY=VALUE (不用 source, 避免 secret 里特殊字符 (引号/反引号/$) 被 shell 解释)
+read_secret() {
+    grep -E "^$1=" "$SECRETS_FILE" | head -1 | cut -d= -f2-
+}
+source_domain=$(read_secret source_domain)
+jwt_secret=$(read_secret jwt_secret)
+voice_relay_secret=$(read_secret voice_relay_secret)
+voice_relay_url=$(read_secret voice_relay_url)
 
-[ -n "${jwt_secret:-}" ] || error "$SECRETS_FILE 缺少 jwt_secret"
-[ -n "${voice_relay_secret:-}" ] || warn "voice_relay_secret 为空（语音功能可能不可用）"
+[ -n "$jwt_secret" ] || error "$SECRETS_FILE 缺少 jwt_secret"
+[ -n "$voice_relay_secret" ] || warn "voice_relay_secret 为空（语音功能可能不可用）"
 
 # 校验 source_domain 是否和 csv 一致
-if [ "${source_domain:-}" != "$DOMAIN" ]; then
+if [ "$source_domain" != "$DOMAIN" ]; then
     warn "⚠️  secrets 里的 source_domain=${source_domain:-空} 与 csv 里的 ${DOMAIN} 不一致！"
     warn "    你可能搞错了 secrets 文件归属，是否继续? (yes/NO)"
     read CONFIRM
