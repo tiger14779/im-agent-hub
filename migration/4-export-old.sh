@@ -93,7 +93,8 @@ awk_yaml() {
         /^[A-Za-z_]+:\s*$/ { cur=$0; sub(/:.*/, "", cur); next }
         cur==sec && $0 ~ "^[[:space:]]+" key "[[:space:]]*:" {
             sub("^[[:space:]]+" key "[[:space:]]*:[[:space:]]*", "")
-            sub(/^"/, ""); sub(/"$/, ""); sub(/[[:space:]]*#.*$/, "")
+            sub(/[[:space:]]*#.*$/, "")
+            sub(/^"/, ""); sub(/"$/, "")
             print; exit
         }
     ' "$file"

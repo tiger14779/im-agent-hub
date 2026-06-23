@@ -78,7 +78,9 @@ awk_yaml() {
         # 在目标 section 内匹配 key
         cur==sec && $0 ~ "^[[:space:]]+" key "[[:space:]]*:" {
             sub("^[[:space:]]+" key "[[:space:]]*:[[:space:]]*", "")
-            sub(/^"/, ""); sub(/"$/, ""); sub(/[[:space:]]*#.*$/, "")
+            # ★ 顺序很重要: 先去注释, 否则 "" + 注释会被错误解析成孤立引号
+            sub(/[[:space:]]*#.*$/, "")
+            sub(/^"/, ""); sub(/"$/, "")
             print; exit
         }
     ' "$file"
