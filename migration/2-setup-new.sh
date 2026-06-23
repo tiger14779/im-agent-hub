@@ -122,6 +122,12 @@ else
     git clone -b "$BRANCH" "$REPO_URL" "$SRC_DIR"
 fi
 
+# ---------- 6b. 把 migration 脚本复制到使用位置 ----------
+info "复制 migration 脚本到 ${BASE_DIR}/migration/ ..."
+mkdir -p "${BASE_DIR}/migration"
+cp "${SRC_DIR}/migration/"*.sh "${BASE_DIR}/migration/"
+chmod +x "${BASE_DIR}/migration/"*.sh
+
 # ---------- 7. 构建前端 (一份共享) ----------
 info "构建 H5 前端..."
 cd "${SRC_DIR}/web/h5"
