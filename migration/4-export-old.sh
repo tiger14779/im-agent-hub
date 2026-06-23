@@ -72,6 +72,12 @@ fi
 
 [[ "$SITE_ID" =~ ^[0-9]{2}$ ]] || error "site_id 必须是两位数字"
 
+# ---------- 0. 装 rsync (新服务器拉数据时需要旧服务器装 rsync) ----------
+if ! command -v rsync >/dev/null; then
+    echo "[INFO]  装 rsync (新服务器拉数据时需要)..."
+    apt-get install -y -qq rsync >/dev/null 2>&1 || echo "[WARN]  rsync 装失败, 后续传数据可能要改用 scp"
+fi
+
 # ---------- 2. 读 DB 名 (复现代码的 base + local override 合并逻辑) ----------
 [ -f "$CONFIG_FILE" ] || error "找不到 $CONFIG_FILE"
 command -v sudo >/dev/null || error "sudo 未装"
