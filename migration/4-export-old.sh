@@ -13,12 +13,14 @@
 #    - 默认不停业务！dump 期间业务继续跑
 #    - dump 是一致性快照 (PG MVCC)，dump 期间的新数据不会进 dump
 #    - dump 完后业务继续写入的数据需要在停机切换时单独处理
-#    - uploads 默认只导最近 30 天 (聊天图片/文件), 老的留在旧服务器
+#    - 默认 uploads 全量打包, 但剔除 7 天前的 .docx (业务每 5 分钟生成一个无用 docx)
+#      这样头像、老聊天图片等不会丢, 同时不会被无用 docx 撑爆
 #
 #  用法:
-#    bash 4-export-old.sh --site-id 03 --domain site03.com               # uploads 默认 30 天
-#    bash 4-export-old.sh --site-id 03 --domain site03.com --uploads-days 0   # 导全部 uploads
-#    bash 4-export-old.sh --site-id 03 --domain site03.com --uploads-days 90  # 改 90 天
+#    bash 4-export-old.sh --site-id 03 --domain site03.com                    # 默认: 全量 - 7天前docx
+#    bash 4-export-old.sh --site-id 03 --domain site03.com --docx-days 30     # 剔除 30 天前 docx
+#    bash 4-export-old.sh --site-id 03 --domain site03.com --docx-days 0      # 不过滤 docx (真全量)
+#    bash 4-export-old.sh --site-id 03 --domain site03.com --uploads-days 30  # 按时间过滤 (覆盖 docx 设置, 只导最近 30 天所有文件)
 # ============================================================
 set -euo pipefail
 
@@ -30,15 +32,19 @@ OUT_DIR="/tmp/im-hub-export"
 
 SITE_ID=""
 DOMAIN=""
-# 默认只导出最近 30 天的 uploads (聊天图片/文件, 老的留在旧服务器, 业务无影响)
-# 想导全部用: --uploads-days 0  (0 = 无过滤, 全量)
-SKIP_UPLOADS_AGE=30
+# uploads 过滤策略 (二选一):
+#  - UPLOADS_DAYS_FILTER > 0: 按时间过滤所有文件 (只保留最近 N 天)
+#  - DOCX_DAYS_FILTER > 0:    全量但剔除 N 天前的 .docx (默认 7 天)
+# 默认走 docx 智能过滤 (UPLOADS_DAYS=0, DOCX_DAYS=7), 保留所有头像/老图片
+UPLOADS_DAYS_FILTER=0
+DOCX_DAYS_FILTER=7
 
 while [[ $# -gt 0 ]]; do
     case $1 in
         --site-id) SITE_ID="$2"; shift 2 ;;
         --domain) DOMAIN="$2"; shift 2 ;;
-        --uploads-days) SKIP_UPLOADS_AGE="$2"; shift 2 ;;
+        --uploads-days) UPLOADS_DAYS_FILTER="$2"; shift 2 ;;
+        --docx-days) DOCX_DAYS_FILTER="$2"; shift 2 ;;
         --install-dir) INSTALL_DIR="$2"; CONFIG_FILE="${INSTALL_DIR}/server/config/config.yaml"; UPLOADS_DIR="${INSTALL_DIR}/server/data/uploads"; EMOJI_DIR="${INSTALL_DIR}/server/data/Emoji"; shift 2 ;;
         *) echo "unknown: $1"; exit 1 ;;
     esac
@@ -167,16 +173,32 @@ DUMP_SHA=$(cat "${DUMP_FILE}.sha256")
 if [ -d "$UPLOADS_DIR" ] && [ "$(ls -A "$UPLOADS_DIR" 2>/dev/null)" ]; then
     info "打包 uploads/ ..."
     START=$(date +%s)
-    if [ "$SKIP_UPLOADS_AGE" -gt 0 ]; then
-        info "  只打包最近 ${SKIP_UPLOADS_AGE} 天的文件..."
-        find "$UPLOADS_DIR" -type f -mtime -"$SKIP_UPLOADS_AGE" -printf '%P\n' \
-            | tar czf "$UPLOADS_TAR" -C "$UPLOADS_DIR" -T -
+    FILELIST="/tmp/.uploads_filelist_$$"
+
+    if [ "$UPLOADS_DAYS_FILTER" -gt 0 ]; then
+        # 模式 A: 按时间过滤所有文件 (覆盖 docx 过滤)
+        info "  模式: 时间过滤, 只导最近 ${UPLOADS_DAYS_FILTER} 天的所有文件"
+        find "$UPLOADS_DIR" -type f -mtime -"$UPLOADS_DAYS_FILTER" -printf '%P\n' > "$FILELIST"
+    elif [ "$DOCX_DAYS_FILTER" -gt 0 ]; then
+        # 模式 B (默认): 全量, 但剔除 N 天前的 .docx
+        TOTAL=$(find "$UPLOADS_DIR" -type f | wc -l)
+        OLD_DOCX=$(find "$UPLOADS_DIR" -type f -name "*.docx" -mtime +"$DOCX_DAYS_FILTER" | wc -l)
+        info "  模式: 全量 - 剔除 ${DOCX_DAYS_FILTER} 天前的 .docx"
+        info "    总文件: $TOTAL, 剔除老 docx: $OLD_DOCX, 实际打包: $((TOTAL - OLD_DOCX))"
+        find "$UPLOADS_DIR" -type f ! \( -name "*.docx" -mtime +"$DOCX_DAYS_FILTER" \) -printf '%P\n' > "$FILELIST"
     else
-        tar czf "$UPLOADS_TAR" -C "$UPLOADS_DIR" .
+        # 模式 C: 真全量, 不过滤
+        info "  模式: 真全量, 不过滤"
+        find "$UPLOADS_DIR" -type f -printf '%P\n' > "$FILELIST"
     fi
+
+    PACKED_COUNT=$(wc -l < "$FILELIST")
+    tar czf "$UPLOADS_TAR" -C "$UPLOADS_DIR" -T "$FILELIST"
+    rm -f "$FILELIST"
+
     TAR_ELAPSED=$(($(date +%s) - START))
     TAR_SIZE=$(stat -c%s "$UPLOADS_TAR")
-    UPLOADS_FILE_COUNT=$(tar tzf "$UPLOADS_TAR" 2>/dev/null | grep -v '/$' | wc -l)
+    UPLOADS_FILE_COUNT=$PACKED_COUNT
     sha256sum "$UPLOADS_TAR" | awk '{print $1}' > "${UPLOADS_TAR}.sha256"
     UPLOADS_SHA=$(cat "${UPLOADS_TAR}.sha256")
     info "uploads 打包: $(du -h "$UPLOADS_TAR" | cut -f1) ($UPLOADS_FILE_COUNT 文件, 耗时 ${TAR_ELAPSED}s)"
@@ -237,7 +259,8 @@ uploads_tar: $(basename "${UPLOADS_TAR:-}")
 uploads_tar_size_bytes: ${TAR_SIZE}
 uploads_tar_sha256: ${UPLOADS_SHA}
 uploads_file_count: ${UPLOADS_FILE_COUNT}
-uploads_age_filter_days: ${SKIP_UPLOADS_AGE}
+uploads_days_filter: ${UPLOADS_DAYS_FILTER}
+uploads_docx_days_filter: ${DOCX_DAYS_FILTER}
 
 # Emoji (公共表情资源, 全量打包)
 emoji_tar: $(basename "${EMOJI_TAR:-}")
