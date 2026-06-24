@@ -239,11 +239,12 @@ echo "[$(date -Iseconds)] backup done, kept latest 7 days"
 EOF
 chmod +x "${BASE_DIR}/backup-all.sh"
 
-# ---------- 14. uploads 简单清理 cron (临时方案, 直到代码修好) ----------
-info "装 uploads 清理 cron (每天清理超过 30 天的图片)..."
-cat > /etc/cron.d/im-hub-uploads-cleanup <<EOF
-# Remove uploaded files older than 30 days (workaround until code is fixed)
-30 3 * * * root find /opt/im-hub/sites/*/data/uploads -type f -mtime +30 -delete 2>/dev/null
+# ---------- 14. uploads 清理 cron (只清自动产生的无用 .docx, 保留头像/图片/语音) ----------
+info "装 uploads 清理 cron (每天清 7 天前的 .docx, 图片/头像不动)..."
+cat > /etc/cron.d/im-hub-uploads-cleanup <<'EOF'
+# 业务每 5 分钟自动产生一个 .docx (无用), 不清会撑爆磁盘
+# 其他类型文件 (图片/头像/语音/视频) 保留不删 (是用户真实数据)
+30 3 * * * root find /opt/im-hub/sites/*/data/uploads -type f -name "*.docx" -mtime +7 -delete 2>/dev/null
 EOF
 
 # ---------- 15. 完成 ----------
